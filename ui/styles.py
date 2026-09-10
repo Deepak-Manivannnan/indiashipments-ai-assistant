@@ -58,6 +58,17 @@ CSS = f"""
       border-bottom: 1px solid {BORDER}; margin: .5rem 0 1.8rem 0;
   }}
 
+  /* --- the conversation ---
+     Its own scroll container, laid out bottom-up so it always opens on the
+     newest message without any scripting. */
+  .is-chat {{
+      min-height: 200px;
+      overflow-y: auto;
+      display: flex; flex-direction: column-reverse;
+      border: 1px solid {BORDER}; border-radius: 12px;
+      padding: .7rem .9rem; background: #fff;
+  }}
+
   /* --- chat bubbles --- */
   .is-msg {{ display: flex; margin: .3rem 0; }}
   .is-msg.bot {{ justify-content: flex-start; }}
@@ -200,14 +211,9 @@ CHAT_LAYOUT_CSS = """
   .is-navrule {{ margin: .35rem 0 .8rem 0 !important; }}
   section[data-testid="stMain"] [data-testid="stVerticalBlock"] {{ gap: .5rem; }}
 
-  .st-key-isa-transcript {{
-      height: calc(100vh - {offset}px) !important;
-      min-height: 200px;
-      border: 1px solid {border}; border-radius: 12px;
-      padding: .7rem .9rem; background: #fff;
-  }}
+  .is-chat {{ height: calc(100vh - {offset}px); }}
 
-  .st-key-isa-transcript [data-testid="stButton"] button {{
+  [data-testid="stButton"] button.is-choice, .is-choices button {{
       font-size: .88rem; padding: .3rem .6rem; border-radius: 10px;
   }}
   div[data-testid="stChatInput"] {{ margin-top: .3rem; }}
@@ -234,13 +240,20 @@ def _chat_layout_css(offset: int) -> str:
 BASE_CHAT_OFFSET = 490
 BANNER_HEIGHT = 62
 UPLOADER_HEIGHT = 110
+OPTION_ROW_HEIGHT = 46
 
 
-def inject_chat_layout(banners: int = 0, uploader: bool = False) -> None:
+def inject_chat_layout(
+    banners: int = 0, uploader: bool = False, option_count: int = 0
+) -> None:
     """Extra styling used only by the assistant page."""
     offset = (
         BASE_CHAT_OFFSET
         + banners * BANNER_HEIGHT
         + (UPLOADER_HEIGHT if uploader else 0)
+        # The choices now sit below the conversation rather than inside it, so
+        # the room they need has to come out of its height or the page grows a
+        # scrollbar again.
+        + (-(-option_count // 2) * OPTION_ROW_HEIGHT if option_count else 0)
     )
     st.markdown(_chat_layout_css(offset), unsafe_allow_html=True)
