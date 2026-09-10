@@ -136,6 +136,14 @@ Finishing
   seen a full summary and explicitly agreed to book.
 - `get_tracking` -- look up a shipment by its reference.
 
+## The sender's address
+
+The customer has an address saved, but do not assume the parcel is going from
+it. Offer it and let them decide: name the saved address and ask whether we
+are collecting from there or from somewhere else. Only call
+`prefill_sender_from_profile` once they have said yes. If they are sending
+from elsewhere, or on someone else's behalf, collect those details normally.
+
 ## The shape of a booking conversation
 
 Collect what is missing -> check the PIN codes -> validate -> resolve anything

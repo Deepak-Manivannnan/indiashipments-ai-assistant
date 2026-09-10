@@ -144,7 +144,15 @@ def _transcript() -> str | None:
 
     with st.container(height=CHAT_HEIGHT, border=False, key="isa-transcript"):
         st.markdown("".join(bubbles), unsafe_allow_html=True)
-        chosen = None if st.session_state.get("pending") else _options()
+        if st.session_state.get("pending"):
+            return None
+        # In a slot of its own, so a chosen option leaves the screen at once
+        # instead of sitting there greyed out until the reply arrives.
+        slot = st.empty()
+        with slot.container():
+            chosen = _options()
+        if chosen:
+            slot.empty()
     return chosen
 
 

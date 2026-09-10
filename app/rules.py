@@ -305,6 +305,19 @@ class ValidationResult:
                 "else in the same message, and do not list what is still "
                 "outstanding."
                 + (
+                    " If they reply with a bare number and no unit, ask whether "
+                    "they mean kilograms or grams before saving it -- do not "
+                    "assume, a parcel of 3 is not the same as 3 kg."
+                    if next_field == "package.weight_g"
+                    else ""
+                )
+                + (
+                    " Give the measurements in centimetres unless they say "
+                    "otherwise, and ask which unit they meant if it is unclear."
+                    if next_field == "package.dimensions"
+                    else ""
+                )
+                + (
                     " This field has a fixed list of choices: call list_options "
                     f"with field='{FIELD_OPTION_LISTS[next_field]}' and offer them."
                     if next_field in FIELD_OPTION_LISTS

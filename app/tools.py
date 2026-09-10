@@ -153,6 +153,35 @@ def _require_document(db, shipment_id: int, doc_type: str) -> None:
         db.flush()
 
 
+def _gate_on_acknowledgement(shipment: Shipment, payload: dict) -> dict:
+    """Make the high-value warning the only thing being asked for.
+
+    Same reasoning as the document gate: told to ask for the acknowledgement,
+    the model mentioned it and carried on to the next question. It cannot book
+    without it, so nothing else should be collected until it is given.
+    """
+    value = shipment.declared_value
+    if value is None or float(value) <= HIGH_VALUE_THRESHOLD_INR:
+        return payload
+    if shipment.insurance_ack:
+        return payload
+    if payload.get("awaiting_document"):
+        return payload  # the document comes first
+
+    payload["awaiting_acknowledgement"] = True
+    payload["ask_next"] = "the insurance acknowledgement"
+    payload["ask_next_options"] = "insurance"
+    payload["ask_next_instruction"] = (
+        f"The contents are declared at Rs {float(value):,.0f}, above the Rs "
+        f"{HIGH_VALUE_THRESHOLD_INR:,} threshold. Tell the user our liability "
+        "is limited unless the parcel is insured and ask them to acknowledge "
+        "it. Ask for NOTHING else until they answer, and call "
+        "acknowledge_insurance the moment they agree. If they would rather "
+        "lower the declared value, take the new figure instead."
+    )
+    return payload
+
+
 def _pending_documents(db, shipment_id: int) -> list[Document]:
     return list(
         db.scalars(
@@ -272,7 +301,9 @@ def save_draft(
             "ask_next_instruction": as_dict["ask_next_instruction"],
             "note": "Draft saved. It must be validated again before booking.",
         }
-        payload = _gate_on_document(db, shipment, payload)
+        payload = _gate_on_acknowledgement(
+            shipment, _gate_on_document(db, shipment, payload)
+        )
 
         # Screening the contents here as well as in validate_shipment means the
         # verdict on a prohibited or restricted item always reaches the model as
@@ -522,7 +553,9 @@ def get_summary(session_id: str) -> dict:
                 and (shipment.insurance_ack or not result.requires_insurance_ack)
             ),
         }
-        return _gate_on_document(db, shipment, summary)
+        return _gate_on_acknowledgement(
+            shipment, _gate_on_document(db, shipment, summary)
+        )
 
 
 def check_pin_serviceability(pin: str, city: str | None = None) -> dict:
@@ -613,7 +646,9 @@ def validate_shipment(session_id: str) -> dict:
                 },
             }
         )
-        return _gate_on_document(db, shipment, payload)
+        return _gate_on_acknowledgement(
+            shipment, _gate_on_document(db, shipment, payload)
+        )
 
 
 def request_document(session_id: str, doc_type: str) -> dict:

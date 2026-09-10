@@ -80,8 +80,10 @@ DECLARATIONS = [
         name="prefill_sender_from_profile",
         description=(
             "Fill the sender details from the signed-in customer's saved "
-            "profile. Use this instead of asking the user for their own name, "
-            "phone and address when they are sending the parcel themselves."
+            "profile. ONLY call this once the user has agreed to it. Ask them "
+            "first whether the parcel is going from their own saved address or "
+            "from somewhere else -- they may well be sending on behalf of "
+            "someone, or from a different place today."
         ),
         parameters=_schema({}),
     ),
