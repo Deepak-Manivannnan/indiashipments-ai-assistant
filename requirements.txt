@@ -1,20 +1,25 @@
-# --- Phase 1: backend + data layer ---
-fastapi==0.118.0
-uvicorn[standard]==0.37.0
+# Backend and data layer
 SQLAlchemy==2.0.43
 PyMySQL==1.1.1
 cryptography==46.0.1
-python-dotenv==1.1.1
 pydantic==2.13.5
 pydantic-settings==2.11.0
+python-dotenv==1.1.1
 
-# --- Phase 2: external integration (PIN lookup) ---
+# The agent
+google-genai==2.22.0
+
+# External services: India Post PIN lookup, OpenStreetMap geocoding
 httpx==0.28.1
 
-# --- Phase 3+ pinned in their own phases: google-genai, streamlit ---
-
-# --- dev ---
-pytest==8.4.2
-python-multipart==0.0.20
+# Interface
 streamlit==1.63.0
 requests==2.34.2
+
+# The HTTP API, used when running the backend as a separate service
+fastapi==0.118.0
+uvicorn[standard]==0.37.0
+python-multipart==0.0.20
+
+# Tests
+pytest==8.4.2
