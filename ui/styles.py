@@ -73,6 +73,11 @@ CSS = f"""
       background: {BRAND}; color: #fff; border-bottom-right-radius: 4px;
   }}
   .is-bubble.error {{ background: #FBE9E7; color: {DANGER}; }}
+  .is-bubble.is-typing {{ color: {MUTED}; font-style: italic; }}
+  .is-bubble.is-typing span {{ animation: is-blink 1.2s infinite; }}
+  .is-bubble.is-typing span:nth-child(2) {{ animation-delay: .2s; }}
+  .is-bubble.is-typing span:nth-child(3) {{ animation-delay: .4s; }}
+  @keyframes is-blink {{ 0%, 60%, 100% {{ opacity: .25; }} 30% {{ opacity: 1; }} }}
 
   /* --- equal-height card rows ---
      Any column that holds a card is stretched, so a row of cards with

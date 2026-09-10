@@ -37,12 +37,18 @@ def _ensure_session() -> None:
     st.session_state.setdefault("state", {})
     st.session_state.setdefault("options", [])
     st.session_state.setdefault("greeted", False)
+    st.session_state.setdefault("pending", None)
+
+
+def _queue(message: str) -> None:
+    """Record what the user said and let the page redraw before we wait."""
+    st.session_state["messages"].append({"role": "user", "content": message})
+    st.session_state["pending"] = message
 
 
 def _send(message: str) -> None:
-    """One turn: show what the user said, then what the backend replied."""
+    """Ask the backend for a reply to a message already on screen."""
     customer = st.session_state.get("customer") or {}
-    st.session_state["messages"].append({"role": "user", "content": message})
     try:
         with st.spinner("ISA is working on that..."):
             turn = api.send_message(
@@ -96,7 +102,8 @@ def _greeting() -> None:
 
 def _reset() -> None:
     api.reset_conversation(st.session_state["session_id"])
-    for key in ("session_id", "messages", "state", "options", "greeted"):
+    for key in ("session_id", "messages", "state", "options", "greeted",
+                "pending"):
         st.session_state.pop(key, None)
 
 
@@ -127,9 +134,16 @@ def _transcript() -> str | None:
             "</div>"
         )
 
+    if st.session_state.get("pending"):
+        bubbles.append(
+            '<div class="is-msg bot"><div class="is-bubble is-typing">'
+            "ISA is typing<span>.</span><span>.</span><span>.</span>"
+            "</div></div>"
+        )
+
     with st.container(height=CHAT_HEIGHT, border=False, key="isa-transcript"):
         st.markdown("".join(bubbles), unsafe_allow_html=True)
-        chosen = _options()
+        chosen = None if st.session_state.get("pending") else _options()
     return chosen
 
 
@@ -303,5 +317,13 @@ def render() -> None:
     message = chosen or typed
     if message:
         st.session_state["options"] = []
-        _send(message)
+        _queue(message)
+        st.rerun()
+
+    # The user's message is on screen by now, so this is the only wait they
+    # see, and they can see what they are waiting for.
+    pending = st.session_state.get("pending")
+    if pending:
+        _send(pending)
+        st.session_state.pop("pending", None)
         st.rerun()

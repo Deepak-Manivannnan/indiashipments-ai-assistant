@@ -110,6 +110,49 @@ def _draft_as_dict(shipment: Shipment) -> dict:
     }
 
 
+def _gate_on_document(db, shipment: Shipment, payload: dict) -> dict:
+    """Make an outstanding document the only thing being asked for.
+
+    A required document blocks the booking outright, so asking for it and for
+    the next detail in the same breath tells the user to do something and then
+    talks over the answer. Enforced here rather than in the prompt, because
+    guidance in the prompt does not hold.
+    """
+    pending = _pending_documents(db, shipment.id)
+    if not pending:
+        return payload
+
+    doc_type = pending[0].doc_type
+    payload["awaiting_document"] = doc_type
+    payload["ask_next"] = f"the {doc_type}"
+    payload["ask_next_options"] = None
+    payload["ask_next_instruction"] = (
+        f"A {doc_type} is required before this shipment can go any further. "
+        "Ask the user to attach it, and ask for NOTHING else -- no weight, no "
+        "size, no addresses. There is an upload control on screen for them to "
+        "use. Wait until it has been supplied before collecting any other "
+        "detail."
+    )
+    return payload
+
+
+def _require_document(db, shipment_id: int, doc_type: str) -> None:
+    """Record that a document is needed, unless it already is."""
+    existing = db.scalars(
+        select(Document).where(
+            Document.shipment_id == shipment_id,
+            Document.doc_type == doc_type,
+            Document.status.in_([DOC_PENDING, DOC_ACCEPTED]),
+        )
+    ).first()
+    if existing is None:
+        db.add(
+            Document(shipment_id=shipment_id, doc_type=doc_type,
+                     status=DOC_PENDING)
+        )
+        db.flush()
+
+
 def _pending_documents(db, shipment_id: int) -> list[Document]:
     return list(
         db.scalars(
@@ -229,6 +272,7 @@ def save_draft(
             "ask_next_instruction": as_dict["ask_next_instruction"],
             "note": "Draft saved. It must be validated again before booking.",
         }
+        payload = _gate_on_document(db, shipment, payload)
 
         # Screening the contents here as well as in validate_shipment means the
         # verdict on a prohibited or restricted item always reaches the model as
@@ -236,6 +280,8 @@ def save_draft(
         # would be stating a rule from its own knowledge rather than from ours.
         if shipment.contents:
             decision = classify_contents(shipment.contents)
+            if decision.requires_document:
+                _require_document(db, shipment.id, decision.requires_document)
             payload["contents_check"] = {
                 "decision": decision.decision,
                 "reasons": decision.reasons,
@@ -435,6 +481,15 @@ def check_contents(description: str) -> dict:
             "These reasons are the only grounds you may give. Do not cite "
             "regulations, authorities or classifications that are not stated "
             "here."
+            + (
+                f" A {decision.requires_document} is required before this "
+                "shipment can go any further: say so and ask the user to "
+                "attach it, and ask for NOTHING else in that message -- no "
+                "weight, no size, no addresses. Collect the rest only after it "
+                "has been supplied."
+                if decision.requires_document
+                else ""
+            )
         ),
     }
 
@@ -450,22 +505,24 @@ def get_summary(session_id: str) -> dict:
         result = validate_draft(draft)
         pending = _pending_documents(db, shipment.id)
 
-        return {
+        as_dict = result.as_dict()
+        summary = {
             "ok": True,
             "draft": draft,
             "validated": shipment.validated,
             "insurance_acknowledged": shipment.insurance_ack,
             "pending_documents": [d.doc_type for d in pending],
-            "still_missing": result.as_dict()["missing_readable"],
-            "ask_next": result.as_dict()["ask_next"],
-            "ask_next_options": result.as_dict()["ask_next_options"],
-            "ask_next_instruction": result.as_dict()["ask_next_instruction"],
+            "still_missing": as_dict["missing_readable"],
+            "ask_next": as_dict["ask_next"],
+            "ask_next_options": as_dict["ask_next_options"],
+            "ask_next_instruction": as_dict["ask_next_instruction"],
             "ready_to_book": (
                 shipment.validated
                 and not pending
                 and (shipment.insurance_ack or not result.requires_insurance_ack)
             ),
         }
+        return _gate_on_document(db, shipment, summary)
 
 
 def check_pin_serviceability(pin: str, city: str | None = None) -> dict:
@@ -539,21 +596,7 @@ def validate_shipment(session_id: str) -> dict:
         # A required document is recorded now so that confirm_booking can block
         # on it even if the model forgets to ask.
         if result.requires_document:
-            already = db.scalars(
-                select(Document).where(
-                    Document.shipment_id == shipment.id,
-                    Document.doc_type == result.requires_document,
-                    Document.status.in_([DOC_PENDING, DOC_ACCEPTED]),
-                )
-            ).first()
-            if already is None:
-                db.add(
-                    Document(
-                        shipment_id=shipment.id,
-                        doc_type=result.requires_document,
-                        status=DOC_PENDING,
-                    )
-                )
+            _require_document(db, shipment.id, result.requires_document)
 
         payload = result.as_dict()
         payload.update(
@@ -570,7 +613,7 @@ def validate_shipment(session_id: str) -> dict:
                 },
             }
         )
-        return payload
+        return _gate_on_document(db, shipment, payload)
 
 
 def request_document(session_id: str, doc_type: str) -> dict:
