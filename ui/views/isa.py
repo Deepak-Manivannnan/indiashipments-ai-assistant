@@ -11,6 +11,7 @@ import re
 import uuid
 
 import streamlit as st
+from streamlit.components import v1 as st_components
 
 from ui import api, components, styles
 
@@ -107,22 +108,7 @@ def _as_bubble_html(text: str) -> str:
 
 
 def _paint(slot, bubbles: list[str]) -> None:
-    """Draw the conversation into its own scrolling element.
-
-    Laid out bottom-up in CSS so the newest message is always in view. A
-    script cannot do this: on Streamlit Cloud components run in a sandboxed
-    frame on another origin and cannot reach the page, so the scrolling worked
-    locally and silently did nothing once deployed.
-
-    The messages are emitted in reverse to compensate for the reversed layout.
-    This is safe here, unlike the earlier attempt, because it is one blob of
-    markup rather than a stack of Streamlit blocks -- the option buttons sit
-    outside it and keep their own order.
-    """
-    slot.markdown(
-        '<div class="is-chat">' + "".join(reversed(bubbles)) + "</div>",
-        unsafe_allow_html=True,
-    )
+    slot.markdown("".join(bubbles), unsafe_allow_html=True)
 
 
 def _bubbles() -> list[str]:
@@ -156,12 +142,40 @@ def _transcript() -> tuple[str | None, object, object]:
     """
     bubbles = _bubbles()
 
-    body = st.empty()
-    _paint(body, bubbles)
-    choices = st.empty()
-    with choices.container():
-        chosen = _options()
+    with st.container(height=CHAT_HEIGHT, border=False, key="isa-transcript"):
+        body = st.empty()
+        _paint(body, bubbles)
+        choices = st.empty()
+        with choices.container():
+            chosen = _options()
     return chosen, body, choices
+
+
+def _scroll_to_latest() -> None:
+    """Keep the newest message in view.
+
+    A fixed-height container does not follow its own content, so without this
+    each reply lands below the fold. Done with a script rather than in CSS: a
+    column-reverse frame also reverses the option buttons inside it.
+    """
+    if not st.session_state.get("messages"):
+        return
+    st_components.html(
+        """
+        <script>
+          const pin = () => {
+            const box = window.parent.document.querySelector(
+              '.st-key-isa-transcript'
+            );
+            if (box) { box.scrollTop = box.scrollHeight; }
+          };
+          pin();
+          setTimeout(pin, 80);
+          setTimeout(pin, 250);
+        </script>
+        """,
+        height=0,
+    )
 
 
 def _outstanding_document(state: dict) -> str | None:
@@ -274,7 +288,6 @@ def render() -> None:
     # transcript shrinks instead of the page growing a scrollbar.
     styles.inject_chat_layout(
         uploader=bool(_outstanding_document(state)),
-        option_count=len(st.session_state.get("options") or []),
     )
 
     left, right = st.columns([1.6, 1], gap="large")
@@ -303,6 +316,7 @@ def render() -> None:
     with right:
         _panel(state)
 
+    _scroll_to_latest()
 
     message = chosen or typed
     if message:
