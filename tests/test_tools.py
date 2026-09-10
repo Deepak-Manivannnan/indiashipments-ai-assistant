@@ -599,3 +599,26 @@ def test_resolve_rejects_nonsense_arguments(session_id):
     fill_valid_draft(session_id)
     assert tools.resolve_address_conflict(session_id, role="nobody", keep="pin")["ok"] is False
     assert tools.resolve_address_conflict(session_id, role="sender", keep="maybe")["ok"] is False
+
+
+def test_a_power_bank_is_blocked_even_without_the_word_battery():
+    """'Power bank' names the item without saying battery."""
+    for phrase in ["power bank", "powerbank", "is a spare power bank allowed?",
+                   "I want to send a power bank"]:
+        assert classify_contents(phrase).decision == "blocked", phrase
+    # A device with its battery fitted is still acceptable.
+    assert classify_contents("laptop with the battery installed").decision == "conditional"
+
+
+def test_acceptance_questions_are_screened_before_the_model_answers():
+    """A bare "can I send X?" gets a verdict attached, so the model cannot
+    invent one. Regression: it once said a spare power bank was fine."""
+    from app.agent.loop import _acceptance_note
+
+    note = _acceptance_note("is a spare power bank allowed?")
+    assert "verdict: blocked" in note
+    assert "power bank" in note.lower()
+
+    assert "verdict: conditional" in _acceptance_note("can I send medicines?")
+    assert _acceptance_note("what is paracetamol used for?") == ""
+    assert _acceptance_note("I want to send books") == ""

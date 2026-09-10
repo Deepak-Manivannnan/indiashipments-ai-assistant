@@ -256,6 +256,32 @@ def _options_for(calls: list[ToolCallRecord], state: dict) -> tuple[list[str], s
 # The loop
 # ---------------------------------------------------------------------------
 
+# "Can I send X?" is an acceptance question even though no booking has started,
+# and the model has been observed answering it from its own knowledge -- saying
+# a spare power bank is fine when our rules block it. The screening is run here
+# so the verdict is in front of it before it writes a word.
+ASKS_IF_ALLOWED = re.compile(
+    r"\b(can|could|may|am i able to)\s+(i|we|you)\s+(send|ship|post|carry)\b"
+    r"|\b(is|are)\s+.{0,40}\b(allowed|permitted|prohibited|banned|acceptable)\b"
+    r"|\bdo you (accept|carry|take)\b",
+    re.IGNORECASE,
+)
+
+
+def _acceptance_note(message: str) -> str:
+    """Screen an acceptance question before the model answers it."""
+    if not ASKS_IF_ALLOWED.search(message):
+        return ""
+
+    decision = tools.check_contents(message)
+    reasons = " ".join(decision.get("reasons") or []) or "No condition applies."
+    return (
+        "\n\n[IndiaShipments acceptance check on the message above -- verdict: "
+        f"{decision['decision']}. {reasons} Answer using this verdict and these "
+        "words only. Do not contradict it or add rules of your own.]"
+    )
+
+
 def run_turn(session_id: str, message: str) -> dict:
     """Process one user message and return the structured reply."""
     settings = get_settings()
@@ -271,7 +297,11 @@ def run_turn(session_id: str, message: str) -> dict:
     client = get_client()
 
     history = load_history(session_id)
-    history.append(types.Content(role="user", parts=[types.Part(text=message)]))
+    history.append(
+        types.Content(
+            role="user", parts=[types.Part(text=message + _acceptance_note(message))]
+        )
+    )
 
     def build_config(include_thinking: bool) -> types.GenerateContentConfig:
         options = dict(

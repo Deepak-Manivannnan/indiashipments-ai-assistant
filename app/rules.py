@@ -134,7 +134,10 @@ def classify_contents(contents: str | None) -> ContentsDecision:
 
     # Lithium batteries are the one item whose verdict depends on how it is
     # packed, so it is screened separately rather than by a flat keyword list.
-    if _mentions(text, ["lithium", "li-ion", "battery", "batteries"]):
+    # "Power bank" names the item without using the word battery, so it has to
+    # bring us into this branch on its own or it slips through as allowed.
+    if _mentions(text, ["lithium", "li-ion", "battery", "batteries",
+                        "power bank", "powerbank"]):
         if _mentions(text, LOOSE_BATTERY_TERMS):
             return ContentsDecision(
                 decision="blocked",
