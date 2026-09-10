@@ -52,6 +52,19 @@ PRICE_TABLE = {
 # on its own. A document requested explicitly is never withdrawn automatically.
 RULE_DRIVEN_DOC_TYPES = ["prescription"]
 
+# Words that describe the role rather than name the person. Saving one of
+# these puts something on screen that looks like real data and is not, so they
+# are refused and the field stays visibly empty.
+PLACEHOLDER_NAMES = {
+    "sender", "recipient", "receiver", "me", "myself", "self", "i", "you",
+    "customer", "user", "my house", "my home", "my address", "same",
+    "n/a", "na", "none", "unknown", "not given", "-",
+}
+
+
+def _is_placeholder(value: str | None) -> bool:
+    return bool(value) and value.strip().lower().strip(".") in PLACEHOLDER_NAMES
+
 
 @contextmanager
 def session_scope():
@@ -153,6 +166,23 @@ def _require_document(db, shipment_id: int, doc_type: str) -> None:
         db.flush()
 
 
+def _last_sender_used(db, customer_id: int, exclude_id: int) -> dict | None:
+    """The sender block from this customer's most recent booking."""
+    previous = db.scalars(
+        select(Shipment)
+        .where(
+            Shipment.customer_id == customer_id,
+            Shipment.reference.is_not(None),
+            Shipment.id != exclude_id,
+        )
+        .order_by(Shipment.id.desc())
+    ).first()
+    if previous is None:
+        return None
+    sender = previous.sender_json or {}
+    return sender if sender.get("name") and sender.get("address") else None
+
+
 def _gate_on_sender_choice(db, session_id: str, shipment: Shipment,
                            payload: dict) -> dict:
     """Ask whose address the parcel is going from, before assuming.
@@ -174,23 +204,44 @@ def _gate_on_sender_choice(db, session_id: str, shipment: Shipment,
     if state.customer_id is None:
         return payload
     customer = db.get(Customer, state.customer_id)
-    if customer is None or not (customer.address and customer.pin):
-        return payload  # nothing saved to offer
+    if customer is None:
+        return payload
 
-    known = ", ".join(
-        filter(None, [customer.name, customer.phone, customer.address,
-                      customer.city, customer.pin])
-    )
+    # Prefer what they saved when registering. Failing that, what they used
+    # last time -- a customer who skipped the address at sign-up has still
+    # told us one on a previous booking, and retyping it is the annoyance
+    # accounts were meant to remove.
+    if customer.address and customer.pin:
+        known = ", ".join(
+            filter(None, [customer.name, customer.phone, customer.address,
+                          customer.city, customer.pin])
+        )
+        source = "saved on their account"
+        tool = "prefill_sender_from_profile"
+        choices = "sender_address"
+    else:
+        previous = _last_sender_used(db, customer.id, shipment.id)
+        if previous is None:
+            return payload  # nothing to offer, so collect it normally
+        known = ", ".join(
+            filter(None, [previous.get("name"), previous.get("phone"),
+                          previous.get("address"), previous.get("city"),
+                          previous.get("pin")])
+        )
+        source = "used on their last shipment"
+        tool = "prefill_sender_from_last_shipment"
+        choices = "sender_previous"
+
     payload["awaiting_sender_choice"] = True
     payload["ask_next"] = "whether the sender is this customer"
-    payload["ask_next_options"] = "sender_address"
+    payload["ask_next_options"] = choices
     payload["ask_next_instruction"] = (
-        f"This customer's saved details are: {known}. Ask whether they are the "
-        "sender, so their own name, number and address can be used, or whether "
-        "someone else is sending. Ask NOTHING else until they answer. If they "
-        "are the sender, call prefill_sender_from_profile -- it fills only the "
-        "blanks, so anything they have already told you is kept. Otherwise "
-        "collect the sender's details from them."
+        f"These sender details are {source}: {known}. Ask whether to use them "
+        "for this shipment, or whether the parcel is going from somewhere else "
+        "or being sent by somebody else. Ask NOTHING else until they answer. "
+        f"If they say yes, call {tool} -- it fills only the blanks, so "
+        "anything they have already told you is kept. Otherwise collect the "
+        "sender's details from them."
     )
     return payload
 
@@ -282,6 +333,9 @@ def save_draft(
         def apply(block: dict, updates: list[tuple[str, object]]) -> dict:
             for key, value in updates:
                 if value is None:
+                    continue
+                # A role word in a name field is not information.
+                if key == "name" and _is_placeholder(str(value)):
                     continue
                 # A city or PIN edit invalidates any earlier acceptance of a
                 # mismatch: the user agreed to the old pairing, not this one.
@@ -437,6 +491,46 @@ def prefill_sender_from_profile(session_id: str) -> dict:
             "The sender details now come from the user's saved profile. Tell "
             "them which details you have used rather than asking for them "
             "again, and ask only for anything the profile did not cover."
+        ),
+    }
+
+
+def prefill_sender_from_last_shipment(session_id: str) -> dict:
+    """Reuse the sender details from this customer's previous booking.
+
+    For customers who registered without an address. Fills blanks only, so
+    anything already given for this shipment stands.
+    """
+    with session_scope() as db:
+        state = _get_state(db, session_id)
+        if state.customer_id is None:
+            return _fail("Nobody is signed in on this conversation.")
+        draft = _get_draft(db, session_id)
+        if draft is None:
+            return _fail("There is no shipment draft for this conversation yet.")
+
+        previous = _last_sender_used(db, state.customer_id, draft.id)
+        if previous is None:
+            return _fail(
+                "This customer has no previous shipment to copy the sender "
+                "details from. Ask them for the details instead."
+            )
+
+        already = draft.sender_json or {}
+        to_apply = {
+            f"sender_{key}": value
+            for key, value in previous.items()
+            if key != "city_pin_accepted" and value and not already.get(key)
+        }
+
+    saved = save_draft(session_id=session_id, **to_apply) if to_apply else {}
+    return {
+        "ok": True,
+        "sender": previous,
+        "ask_next": saved.get("ask_next"),
+        "note": (
+            "The sender details are reused from the customer's last shipment. "
+            "Say which details you have used rather than asking for them again."
         ),
     }
 
@@ -1086,7 +1180,10 @@ def list_options(field: str) -> dict:
         "service_type": SERVICE_TYPES,
         "contents_category": CONTENTS_CATEGORIES,
         "insurance": ["Yes, I acknowledge", "No, reduce the declared value"],
-        "sender_address": ["I'm the sender", "Someone else is sending"],
+        "sender_address": ["Use my saved details", "A different sender"],
+        "sender_previous": [
+            "Use my last shipment's details", "A different sender",
+        ],
     }
     if field not in catalogue:
         return _fail(

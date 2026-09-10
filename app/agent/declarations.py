@@ -88,6 +88,15 @@ DECLARATIONS = [
         parameters=_schema({}),
     ),
     types.FunctionDeclaration(
+        name="prefill_sender_from_last_shipment",
+        description=(
+            "Reuse the sender details from this customer's previous booking, "
+            "for customers who registered without an address. Only call it "
+            "once they have agreed. It fills blanks only."
+        ),
+        parameters=_schema({}),
+    ),
+    types.FunctionDeclaration(
         name="list_my_shipments",
         description=(
             "List the signed-in customer's existing shipments and their "
@@ -238,6 +247,7 @@ SESSION_SCOPED = {
     "acknowledge_insurance",
     "confirm_booking",
     "prefill_sender_from_profile",
+    "prefill_sender_from_last_shipment",
     "list_my_shipments",
     "resolve_address_conflict",
 }
@@ -251,6 +261,7 @@ CALLABLE_TOOLS = {
     "check_contents": tools.check_contents,
     "resolve_address_conflict": tools.resolve_address_conflict,
     "prefill_sender_from_profile": tools.prefill_sender_from_profile,
+    "prefill_sender_from_last_shipment": tools.prefill_sender_from_last_shipment,
     "list_my_shipments": tools.list_my_shipments,
     "check_pin_serviceability": tools.check_pin_serviceability,
     "validate_shipment": tools.validate_shipment,

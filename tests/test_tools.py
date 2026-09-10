@@ -622,3 +622,93 @@ def test_acceptance_questions_are_screened_before_the_model_answers():
     assert "verdict: conditional" in _acceptance_note("can I send medicines?")
     assert _acceptance_note("what is paracetamol used for?") == ""
     assert _acceptance_note("I want to send books") == ""
+
+
+# ---------------------------------------------------------------------------
+# The sender is asked about, never assumed
+# ---------------------------------------------------------------------------
+
+def test_a_role_word_is_not_accepted_as_a_name(session_id):
+    """"Sender" on screen looks like real data and is not."""
+    tools.save_draft(session_id, sender_name="Sender", recipient_name="me")
+    draft = tools.get_summary(session_id)["draft"]
+
+    assert not draft["sender"].get("name")
+    assert not draft["recipient"].get("name")
+
+    tools.save_draft(session_id, sender_name="Aravind Kumar")
+    assert tools.get_summary(session_id)["draft"]["sender"]["name"] == "Aravind Kumar"
+
+
+def test_a_customer_with_a_saved_address_is_asked_before_it_is_used(session_id):
+    tools.save_draft(session_id, contents="Books")
+    summary = tools.get_summary(session_id)
+
+    assert summary["awaiting_sender_choice"] is True
+    assert summary["ask_next_options"] == "sender_address"
+    assert "saved on their account" in summary["ask_next_instruction"]
+    assert tools.list_options("sender_address")["options"] == [
+        "Use my saved details", "A different sender",
+    ]
+
+
+def test_a_customer_with_no_saved_address_is_offered_their_last_shipment():
+    """Registering without an address should not mean retyping it forever."""
+    email = f"noaddr{uuid.uuid4().hex[:6]}@example.com"
+    created = auth.create_customer(email=email, password="demo1234",
+                                   name="No Address")
+    customer_id = created["customer"]["id"]
+
+    first = f"test-{uuid.uuid4().hex[:12]}"
+    tools.bind_session(first, customer_id)
+    tools.save_draft(
+        first, **{**VALID_SENDER, **VALID_RECIPIENT, **VALID_PACKAGE}
+    )
+    tools.validate_shipment(first)
+    booking = tools.confirm_booking(first)
+    assert booking["ok"] is True
+
+    second = f"test-{uuid.uuid4().hex[:12]}"
+    tools.bind_session(second, customer_id)
+    tools.save_draft(second, contents="Books")
+    summary = tools.get_summary(second)
+    assert summary["awaiting_sender_choice"] is True
+    assert "used on their last shipment" in summary["ask_next_instruction"]
+    assert summary["ask_next_options"] == "sender_previous"
+
+    reused = tools.prefill_sender_from_last_shipment(second)
+    assert reused["ok"] is True
+    assert tools.get_summary(second)["draft"]["sender"]["name"] == "Rahul Menon"
+
+    db = SessionLocal()
+    try:
+        for sid in (first, second):
+            state = db.get(ConversationState, sid)
+            if state:
+                if state.draft_shipment_id:
+                    shipment = db.get(Shipment, state.draft_shipment_id)
+                    if shipment is not None:
+                        db.delete(shipment)
+                db.delete(state)
+        for shipment in db.scalars(
+            select(Shipment).where(Shipment.customer_id == customer_id)
+        ):
+            db.delete(shipment)
+        customer = db.get(auth.Customer, customer_id)
+        if customer is not None:
+            db.delete(customer)
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_details_already_given_survive_the_prefill(session_id):
+    """A pickup address the customer typed is never replaced by the profile."""
+    tools.save_draft(session_id, sender_address="14 SS Street, Tollgate",
+                     sender_pin="600081")
+    tools.prefill_sender_from_profile(session_id)
+
+    sender = tools.get_summary(session_id)["draft"]["sender"]
+    assert sender["address"] == "14 SS Street, Tollgate"
+    assert sender["pin"] == "600081"
+    assert sender["name"] == "Rahul Menon"   # the blanks, and only the blanks
