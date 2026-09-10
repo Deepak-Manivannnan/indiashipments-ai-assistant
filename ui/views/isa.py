@@ -11,6 +11,7 @@ import re
 import uuid
 
 import streamlit as st
+from streamlit.components import v1 as st_components
 
 from ui import api, components, styles
 
@@ -106,11 +107,15 @@ def _as_bubble_html(text: str) -> str:
     return safe.replace("\n", "<br>")
 
 
-def _transcript() -> None:
+def _transcript() -> str | None:
     """The conversation, in its own scrolling frame.
 
     Rendered as bubbles rather than Streamlit's chat rows so the user's
     messages can sit on the right, as they do in every other chat interface.
+
+    The option buttons live inside this frame, directly under the question they
+    answer. Outside it they added height to the page and pushed the composer
+    off the bottom of the window.
     """
     bubbles = []
     for message in st.session_state["messages"]:
@@ -124,16 +129,38 @@ def _transcript() -> None:
 
     with st.container(height=CHAT_HEIGHT, border=False, key="isa-transcript"):
         st.markdown("".join(bubbles), unsafe_allow_html=True)
+        return _options()
+
+
+def _scroll_to_latest() -> None:
+    """Keep the newest message in view.
+
+    A container with a fixed height does not follow its own content, so
+    without this the reply to each answer arrives below the fold and has to be
+    scrolled to by hand.
+    """
+    st_components.html(
+        """
+        <script>
+          const pin = () => {
+            const box = window.parent.document.querySelector(
+              '.st-key-isa-transcript'
+            );
+            if (box) { box.scrollTop = box.scrollHeight; }
+          };
+          pin();
+          // The frame is still settling when this first runs.
+          setTimeout(pin, 80);
+          setTimeout(pin, 250);
+        </script>
+        """,
+        height=0,
+    )
 
 
 def _banners(state: dict) -> None:
-    if state.get("stub_mode"):
-        st.markdown(
-            '<div class="is-banner stub"><b>Stub mode</b> &mdash; replies are '
-            "scripted and no AI model is being called. The rules, database and "
-            "booking guardrails are still real.</div>",
-            unsafe_allow_html=True,
-        )
+    """Only things the customer needs to act on. Stub mode is a developer
+    concern and is announced in the server log, not in the product."""
     for blocker in state.get("blockers") or []:
         st.markdown(
             f'<div class="is-banner blocked"><b>Booking paused</b> &mdash; '
@@ -191,7 +218,7 @@ def _options() -> str | None:
         return None
 
     chosen = None
-    columns = st.columns(min(len(options), 3))
+    columns = st.columns(min(len(options), 2))
     for index, option in enumerate(options):
         with columns[index % len(columns)]:
             if st.button(
@@ -252,18 +279,16 @@ def render() -> None:
     # transcript shrinks instead of the page growing a scrollbar.
     blockers = state.get("blockers") or []
     styles.inject_chat_layout(
-        banners=len(blockers) + (1 if state.get("stub_mode") else 0),
+        banners=len(blockers),
         uploader=bool(_outstanding_document(state)),
-        options=bool(st.session_state.get("options")),
     )
 
     left, right = st.columns([1.6, 1], gap="large")
 
     with left:
         _banners(state)
-        _transcript()
+        chosen = _transcript()
         _document_upload(state)
-        chosen = _options()
 
         # The composer, with the new-chat icon beside it. Inside the column so
         # it is the width of the conversation, and beside the input so it stays
@@ -284,6 +309,8 @@ def render() -> None:
 
     with right:
         _panel(state)
+
+    _scroll_to_latest()
 
     message = chosen or typed
     if message:

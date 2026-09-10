@@ -131,9 +131,6 @@ CSS = f"""
   .is-banner.blocked {{
       background: #FDF3E3; border-color: #F0D9AE; color: #7A4A00;
   }}
-  .is-banner.stub {{
-      background: #FFF4CC; border-color: #E8CE72; color: #6B5200;
-  }}
   .is-banner.ready {{
       background: #E4F3EA; border-color: #B7DFC7; color: #0E5233;
   }}
@@ -196,6 +193,9 @@ CHAT_LAYOUT_CSS = """
       padding: .7rem .9rem; background: #fff;
   }}
 
+  .st-key-isa-transcript [data-testid="stButton"] button {{
+      font-size: .88rem; padding: .3rem .6rem; border-radius: 10px;
+  }}
   div[data-testid="stChatInput"] {{ margin-top: .3rem; }}
   div[data-testid="stChatInput"] textarea {{ font-size: .93rem; }}
 
@@ -220,17 +220,13 @@ def _chat_layout_css(offset: int) -> str:
 BASE_CHAT_OFFSET = 470
 BANNER_HEIGHT = 62
 UPLOADER_HEIGHT = 110
-OPTIONS_HEIGHT = 58
 
 
-def inject_chat_layout(
-    banners: int = 0, uploader: bool = False, options: bool = False
-) -> None:
+def inject_chat_layout(banners: int = 0, uploader: bool = False) -> None:
     """Extra styling used only by the assistant page."""
     offset = (
         BASE_CHAT_OFFSET
         + banners * BANNER_HEIGHT
         + (UPLOADER_HEIGHT if uploader else 0)
-        + (OPTIONS_HEIGHT if options else 0)
     )
     st.markdown(_chat_layout_css(offset), unsafe_allow_html=True)
