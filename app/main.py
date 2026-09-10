@@ -65,6 +65,22 @@ def demo_accounts() -> dict:
     return {"accounts": list_demo_accounts()}
 
 
+@app.post("/chat/bind")
+def chat_bind(request: ChatRequest) -> dict:
+    """Attach a signed-in customer to a conversation.
+
+    Called right after sign-in so the assistant can greet the user with their
+    real shipments, instead of waiting for their first message to find out who
+    they are.
+    """
+    if request.customer_id is None:
+        raise HTTPException(status_code=400, detail="customer_id is required")
+    result = bind_session(request.session_id, request.customer_id)
+    if not result["ok"]:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
 @app.get("/me/shipments")
 def my_shipments(session_id: str) -> dict:
     result = list_my_shipments(session_id)

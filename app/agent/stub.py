@@ -24,8 +24,9 @@ _last_asked: dict[str, str] = {}
 TRACKING_REFERENCE = re.compile(r"\b(IS-\d+)\b", re.IGNORECASE)
 NUMBER = re.compile(r"\d+(?:\.\d+)?")
 
-AFFIRMATIVE = {"yes", "yes please", "book it", "confirm", "go ahead", "ok", "okay",
-               "yes, please book it", "please book it", "sure"}
+# Any of these, once the draft is bookable, means "go ahead".
+CONFIRMING = re.compile(r"\b(yes|yeah|confirm|book|go ahead|proceed|ok|okay)\b",
+                        re.IGNORECASE)
 
 
 def _record(calls: list, name: str, args: dict, result: dict) -> dict:
@@ -113,24 +114,7 @@ def stub_turn(session_id: str, message: str) -> dict:
                     tools.check_contents(text),
                 )
 
-    # 3. An explicit yes books it, if the guardrails allow.
-    if lowered in AFFIRMATIVE or "book it" in lowered:
-        _record(calls, "validate_shipment", {}, tools.validate_shipment(session_id))
-        result = _record(
-            calls, "confirm_booking", {}, tools.confirm_booking(session_id)
-        )
-        if result.get("ok"):
-            booked_reference = result["reference"]
-            reply = (
-                f"Booked. Your IndiaShipments tracking reference is "
-                f"{booked_reference}."
-            )
-            _last_asked.pop(session_id, None)
-            return _respond(session_id, reply, [], None, calls, booked_reference)
-        reply = f"I can't book this yet. {result.get('error', '')}"
-        return _respond(session_id, reply, [], None, calls, None)
-
-    # 4. Otherwise ask for the next outstanding thing.
+    # 3. Otherwise work out where the draft stands.
     summary = _record(calls, "get_summary", {}, tools.get_summary(session_id))
     if not summary.get("ok"):
         _last_asked[session_id] = "contents"
@@ -147,6 +131,30 @@ def stub_turn(session_id: str, message: str) -> dict:
     validation = _record(
         calls, "validate_shipment", {}, tools.validate_shipment(session_id)
     )
+
+    # 4. A yes only means "book it" once there is something bookable. Deciding
+    # this from the draft's state rather than from the wording keeps the stub
+    # from trying to book at "I want to book a parcel", and lets the Confirm
+    # button phrase itself however it likes.
+    ready = tools.get_summary(session_id).get("ready_to_book")
+    if ready and CONFIRMING.search(lowered):
+        result = _record(
+            calls, "confirm_booking", {}, tools.confirm_booking(session_id)
+        )
+        if result.get("ok"):
+            booked_reference = result["reference"]
+            _last_asked.pop(session_id, None)
+            return _respond(
+                session_id,
+                "Booked. Your IndiaShipments tracking reference is "
+                f"{booked_reference}.",
+                [], None, calls, booked_reference,
+            )
+        return _respond(
+            session_id, f"I can't book this yet. {result.get('error', '')}",
+            [], None, calls, None,
+        )
+
     if validation.get("errors"):
         _last_asked.pop(session_id, None)
         return _respond(
@@ -161,7 +169,8 @@ def stub_turn(session_id: str, message: str) -> dict:
                 f"Here is the shipment: {draft['sender'].get('name')} in "
                 f"{draft['sender'].get('city')} to {draft['recipient'].get('name')} "
                 f"in {draft['recipient'].get('city')}, {draft.get('contents')}, "
-                f"{draft.get('service_type')}. Shall I book it?"
+                f"{draft.get('service_type')}. Say yes, or use the Confirm "
+                "booking button, and I will book it."
             )
         else:
             blockers = summary.get("pending_documents") or []
