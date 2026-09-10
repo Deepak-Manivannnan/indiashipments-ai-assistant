@@ -6,10 +6,23 @@ then:
     streamlit run streamlit_app.py
 """
 
+import os
+
 import streamlit as st
 
-from ui import api, styles
-from ui.views import auth, isa, pages
+# Streamlit Cloud provides secrets through st.secrets rather than the
+# environment, while the application reads plain environment variables so that
+# it behaves the same locally. Bridge the two before anything is imported that
+# reads configuration.
+try:  # pragma: no cover - only meaningful on Streamlit Cloud
+    for _key, _value in st.secrets.items():
+        if isinstance(_value, str):
+            os.environ.setdefault(_key, _value)
+except Exception:
+    pass  # no secrets file locally, which is fine
+
+from ui import api, styles  # noqa: E402
+from ui.views import auth, isa, pages  # noqa: E402
 
 st.set_page_config(
     page_title="IndiaShipments",

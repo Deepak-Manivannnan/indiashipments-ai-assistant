@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     mysql_user: str = "root"
     mysql_password: str = ""
     mysql_database: str = "indiashipments"
+    # Hosted MySQL requires TLS; a local server generally does not.
+    mysql_ssl: bool = False
+    mysql_ssl_ca: str = ""
 
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
@@ -38,6 +41,17 @@ class Settings(BaseSettings):
             database=database,
             query={"charset": "utf8mb4"},
         )
+
+    @property
+    def connect_args(self) -> dict:
+        """Driver options. TLS is enabled only when asked for."""
+        if not self.mysql_ssl:
+            return {}
+        if self.mysql_ssl_ca:
+            return {"ssl": {"ca": self.mysql_ssl_ca}}
+        # No certificate supplied: encrypt the connection without verifying
+        # the server's certificate. Stated as a limitation rather than hidden.
+        return {"ssl": {"check_hostname": False}}
 
     @property
     def database_url(self) -> URL:

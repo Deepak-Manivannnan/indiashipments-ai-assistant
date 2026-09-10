@@ -12,6 +12,8 @@ settings = get_settings()
 engine = create_engine(
     settings.database_url,
     pool_pre_ping=True,  # survives MySQL dropping idle connections
+    pool_recycle=280,    # hosted MySQL closes idle connections quickly
+    connect_args=settings.connect_args,
     future=True,
 )
 
