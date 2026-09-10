@@ -462,6 +462,27 @@ def _ask_next(session_id: str, calls: list, prefix: str, allow_confirm) -> dict:
             session_id, prefix + " ".join(validation["errors"]), [], None, calls, None
         )
 
+    # A high declared value stops the conversation here. Mentioning the
+    # acknowledgement and then asking the next question in the same breath
+    # tells the user they must do something and then moves past it.
+    if _needs_insurance_ack(summary) and not _pending_ack.get(session_id):
+        _pending_ack[session_id] = True
+        _last_asked.pop(session_id, None)
+        # Do not repeat this as a lead-in once it has been dealt with.
+        _new_warnings(session_id, validation.get("warnings", []))
+        return _respond(
+            session_id,
+            prefix + (
+                f"Before we go on: you've declared the contents at Rs "
+                f"{float(summary['draft']['declared_value']):,.0f}, which is "
+                f"above Rs {HIGH_VALUE_THRESHOLD_INR:,}. Our liability is "
+                "limited unless the parcel is insured, so I need you to "
+                "acknowledge that before I can book it."
+            ),
+            ["I acknowledge this", "Reduce the declared value"],
+            "insurance", calls, None,
+        )
+
     ask_next = summary.get("ask_next")
     if ask_next is None:
         _last_asked.pop(session_id, None)

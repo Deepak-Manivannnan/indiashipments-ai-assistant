@@ -158,17 +158,6 @@ def _scroll_to_latest() -> None:
     )
 
 
-def _banners(state: dict) -> None:
-    """Only things the customer needs to act on. Stub mode is a developer
-    concern and is announced in the server log, not in the product."""
-    for blocker in state.get("blockers") or []:
-        st.markdown(
-            f'<div class="is-banner blocked"><b>Booking paused</b> &mdash; '
-            f"{blocker}.</div>",
-            unsafe_allow_html=True,
-        )
-
-
 def _outstanding_document(state: dict) -> str | None:
     """The document the booking is waiting on, if any."""
     return next(
@@ -277,16 +266,13 @@ def render() -> None:
 
     # Tell the stylesheet how much room the conditional pieces need, so the
     # transcript shrinks instead of the page growing a scrollbar.
-    blockers = state.get("blockers") or []
     styles.inject_chat_layout(
-        banners=len(blockers),
         uploader=bool(_outstanding_document(state)),
     )
 
     left, right = st.columns([1.6, 1], gap="large")
 
     with left:
-        _banners(state)
         chosen = _transcript()
         _document_upload(state)
 
