@@ -1,0 +1,17 @@
+# --- Phase 1: backend + data layer ---
+fastapi==0.118.0
+uvicorn[standard]==0.37.0
+SQLAlchemy==2.0.43
+PyMySQL==1.1.1
+cryptography==46.0.1
+python-dotenv==1.1.1
+pydantic==2.13.5
+pydantic-settings==2.11.0
+
+# --- Phase 2: external integration (PIN lookup) ---
+httpx==0.28.1
+
+# --- Phase 3+ pinned in their own phases: google-genai, streamlit ---
+
+# --- dev ---
+pytest==8.4.2
