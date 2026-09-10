@@ -43,15 +43,23 @@ def get_client() -> genai.Client:
     if _client is None:
         settings = get_settings()
         if not settings.gemini_api_key:
-            raise RuntimeError(
-                "GEMINI_API_KEY is not set. Add it to .env before using the agent."
+            raise ModelUnavailable(
+                "GEMINI_API_KEY is not set.", reason="misconfigured"
             )
         _client = genai.Client(api_key=settings.gemini_api_key)
     return _client
 
 
 class ModelUnavailable(Exception):
-    """The model could not be reached. The draft is untouched and still valid."""
+    """The model could not be reached. The draft is untouched and still valid.
+
+    `reason` distinguishes a misconfiguration from a busy service, because
+    "try again in a moment" is useless advice when the API key is wrong.
+    """
+
+    def __init__(self, message: str, reason: str = "unavailable"):
+        super().__init__(message)
+        self.reason = reason
 
 
 # The free tier allows only a handful of requests per minute, and every tool
@@ -90,7 +98,8 @@ def _generate(client, model, contents, build_config):
             if exc.code == 429:
                 if attempt == RATE_LIMIT_RETRIES:
                     raise ModelUnavailable(
-                        "The language model is rate limited right now."
+                        "The language model is rate limited right now.",
+                        reason="rate_limited",
                     ) from exc
                 wait = min(_retry_delay_from(exc) or 20.0, MAX_RETRY_WAIT_SECONDS) + 1
                 logger.warning("Rate limited by Gemini; waiting %.0fs", wait)
@@ -105,7 +114,16 @@ def _generate(client, model, contents, build_config):
             # Anything else is a real fault. Log it in full -- masking a 400 as
             # "service unavailable" once cost an afternoon.
             logger.error("Gemini rejected the request (%s): %s", exc.code, exc)
-            raise ModelUnavailable(f"The model rejected the request: {exc}") from exc
+            text = str(exc).lower()
+            misconfigured = (
+                "api key not valid" in text
+                or "api_key_invalid" in text
+                or "permission" in text
+            )
+            raise ModelUnavailable(
+                f"The model rejected the request: {exc}",
+                reason="misconfigured" if misconfigured else "rejected",
+            ) from exc
 
         except genai_errors.ServerError as exc:
             if attempt == RATE_LIMIT_RETRIES:
@@ -321,6 +339,41 @@ def _acceptance_note(message: str) -> str:
     )
 
 
+DEGRADED_REPLIES = {
+    "misconfigured": (
+        "The assistant isn't set up correctly on this deployment -- its "
+        "language model credentials are missing or invalid. Nothing you've "
+        "told me has been lost, and everything else on the site still works. "
+        "Please let us know so it can be fixed."
+    ),
+    "rate_limited": (
+        "The assistant has reached its usage limit for the moment, so I "
+        "couldn't process that message. Nothing you've told me has been lost "
+        "-- your draft is saved. Please try again shortly."
+    ),
+}
+DEFAULT_DEGRADED = (
+    "I can't reach the assistant service at the moment, so I couldn't process "
+    "that message. Nothing you've told me has been lost -- your draft is "
+    "saved. Please try again in a moment."
+)
+
+
+def _degraded(session_id: str, exc: "ModelUnavailable") -> dict:
+    """A turn that could not run, reported for what it actually was."""
+    reason = getattr(exc, "reason", "unavailable")
+    logger.error("Turn abandoned (%s): %s", reason, exc)
+    return {
+        "reply": DEGRADED_REPLIES.get(reason, DEFAULT_DEGRADED),
+        "options": [],
+        "expects": None,
+        "allow_free_text": True,
+        "state": _build_state(session_id, None),
+        "tool_calls": [],
+        "degraded": True,
+    }
+
+
 def run_turn(session_id: str, message: str) -> dict:
     """Process one user message and return the structured reply."""
     settings = get_settings()
@@ -333,7 +386,10 @@ def run_turn(session_id: str, message: str) -> dict:
 
         return stub_turn(session_id, message)
 
-    client = get_client()
+    try:
+        client = get_client()
+    except ModelUnavailable as exc:
+        return _degraded(session_id, exc)
 
     history = load_history(session_id)
     history.append(
@@ -365,23 +421,10 @@ def run_turn(session_id: str, message: str) -> dict:
     for _ in range(MAX_TOOL_ROUNDS):
         try:
             response = _generate(client, settings.gemini_model, history, build_config)
-        except ModelUnavailable:
+        except ModelUnavailable as exc:
             # Everything the user has told us is already in the database, so the
             # draft survives; only this turn is lost.
-            return {
-                "reply": (
-                    "I can't reach the assistant service at the moment, so I "
-                    "couldn't process that message. Nothing you've told me has "
-                    "been lost -- your draft is saved. Please try again in a "
-                    "moment."
-                ),
-                "options": [],
-                "expects": None,
-                "allow_free_text": True,
-                "state": _build_state(session_id, None),
-                "tool_calls": [],
-                "degraded": True,
-            }
+            return _degraded(session_id, exc)
 
         candidate = response.candidates[0] if response.candidates else None
         parts = (candidate.content.parts if candidate and candidate.content else None) or []
