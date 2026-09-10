@@ -111,8 +111,27 @@ def draft_panel(state: dict) -> None:
         _row("Declared value", f"Rs {float(value):,.0f}" if value else None),
     ]
 
+    # Distance and price appear once there is enough to work them out. An
+    # unknown distance is shown as unknown rather than quietly omitted.
+    distance = state.get("distance_km")
+    price = state.get("estimated_price_inr")
+    if "distance_km" in state:
+        rows.append(
+            _row("Distance", f"{distance:,.0f} km" if distance else "unknown")
+        )
+        rows.append(
+            _row("Estimated price", f"Rs {price:,.0f}" if price else "unavailable")
+        )
+
+    note = (
+        '<p class="is-muted" style="margin:.6rem 0 0 0;font-size:.78rem">'
+        "Estimated by IndiaShipments from distance and weight. Not a carrier "
+        "quote.</p>"
+        if price
+        else ""
+    )
     st.markdown(
-        f'<div class="is-panel"><h4>This shipment</h4>{"".join(rows)}</div>',
+        f'<div class="is-panel"><h4>This shipment</h4>{"".join(rows)}{note}</div>',
         unsafe_allow_html=True,
     )
 

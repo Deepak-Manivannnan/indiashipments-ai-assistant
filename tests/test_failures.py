@@ -208,3 +208,37 @@ def test_a_delivered_shipment_reads_as_finished():
     result = tools.get_tracking("IS-1001")
     assert result["status"] == "Delivered"
     assert result["events"][-1]["status"] == "Delivered"
+
+
+# ---------------------------------------------------------------------------
+# The quote shown in the panel
+# ---------------------------------------------------------------------------
+
+def test_distance_and_price_appear_once_the_draft_allows_them(signed_in_session):
+    """The application works these out; it does not wait to be asked."""
+    tools.save_draft(signed_in_session, sender_pin="682031",
+                     recipient_pin="560001", contents="Books")
+    assert "distance_km" not in loop._build_state(signed_in_session, None)
+
+    tools.save_draft(signed_in_session, weight_g=2000, service_type="Standard")
+    state = loop._build_state(signed_in_session, None)
+    assert 300 < state["distance_km"] < 420        # Kochi -> Bengaluru
+    assert state["estimated_price_inr"] > 0
+
+    standard = state["estimated_price_inr"]
+    tools.save_draft(signed_in_session, service_type="Express")
+    assert loop._build_state(signed_in_session, None)["estimated_price_inr"] > standard
+
+
+def test_no_price_is_shown_when_the_distance_cannot_be_found(signed_in_session,
+                                                             monkeypatch):
+    tools.save_draft(signed_in_session, sender_pin="682031",
+                     recipient_pin="560001", contents="Books",
+                     weight_g=2000, service_type="Standard")
+    monkeypatch.setattr(
+        tools, "calculate_distance",
+        lambda *a, **k: {"ok": True, "status": "unknown", "distance_km": None},
+    )
+    state = loop._build_state(signed_in_session, None)
+    assert state["distance_km"] is None
+    assert state["estimated_price_inr"] is None

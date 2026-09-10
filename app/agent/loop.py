@@ -199,6 +199,37 @@ def execute_tool(name: str, args: dict, session_id: str) -> dict:
 # Response shaping
 # ---------------------------------------------------------------------------
 
+def _quote(draft: dict) -> dict:
+    """Distance and an estimated price, whenever the draft allows one.
+
+    Worked out by the application rather than left to the model to remember:
+    it treated both tools as optional, so the customer saw a price on some
+    bookings and not on others. Both lookups are cached, so this costs nothing
+    after the first time. An unavailable distance yields no price at all --
+    never a guessed one.
+    """
+    sender = (draft.get("sender") or {}).get("pin")
+    recipient = (draft.get("recipient") or {}).get("pin")
+    weight = (draft.get("package") or {}).get("weight_g")
+    service = draft.get("service_type")
+    if not (sender and recipient and weight and service):
+        return {}
+
+    distance = tools.calculate_distance(sender, recipient)
+    if distance.get("status") != "ok":
+        return {"distance_km": None, "estimated_price_inr": None}
+
+    price = tools.estimate_price(
+        weight_g=weight, service_type=service, distance_km=distance["distance_km"]
+    )
+    return {
+        "distance_km": distance["distance_km"],
+        "estimated_price_inr": (
+            price.get("estimated_price_inr") if price.get("status") == "ok" else None
+        ),
+    }
+
+
 def _build_state(session_id: str, reference: str | None) -> dict:
     """The live draft panel's data, read straight from the database."""
     summary = tools.get_summary(session_id)
@@ -222,6 +253,7 @@ def _build_state(session_id: str, reference: str | None) -> dict:
     return {
         "has_draft": True,
         "draft": summary.get("draft"),
+        **_quote(summary.get("draft") or {}),
         # Which fixed-choice list, if any, belongs with the next question.
         "ask_next_options": summary.get("ask_next_options"),
         "validated": summary.get("validated"),
