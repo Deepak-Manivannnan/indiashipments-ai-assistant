@@ -115,6 +115,10 @@ class ConversationState(Base):
     # Carried back into the next model turn so the agent can self-correct.
     last_tool_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # The model-facing transcript, so a conversation survives a page refresh or
+    # a backend restart rather than living only in the UI process.
+    history_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=utcnow, onupdate=utcnow

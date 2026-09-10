@@ -36,6 +36,32 @@ class ShipmentDetailOut(ShipmentSummaryOut):
     tracking_events: list[TrackingEventOut] = []
 
 
+class ChatRequest(BaseModel):
+    session_id: str
+    message: str
+
+
+class ChatResponse(BaseModel):
+    """What one agent turn returns.
+
+    `options` drives the selectable buttons in the UI and is always drawn from
+    the application's own lists; `allow_free_text` stays true so the user can
+    answer with something not on the list.
+    """
+
+    reply: str
+    options: list[str] = []
+    expects: str | None = None
+    allow_free_text: bool = True
+    state: dict = {}
+    tool_calls: list[dict] = []
+    degraded: bool = False
+
+
+class ResetRequest(BaseModel):
+    session_id: str
+
+
 class TrackingOut(BaseModel):
     """Shaped after the brief: latest status, latest event time, plain-language line."""
 

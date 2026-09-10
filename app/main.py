@@ -1,23 +1,96 @@
 """FastAPI application.
 
-Phase 1 exposes read-only endpoints so the seeded data is verifiable before any
-agent, tools or LLM exist. Booking happens through the agent in later phases.
+`/chat` runs one turn of the agent loop and returns everything the UI needs:
+the reply, any selectable options, and the live state of the draft. The
+read-only shipment endpoints remain, so the persisted data can be inspected
+independently of the conversation.
 """
 
-from fastapi import Depends, FastAPI, HTTPException
+from pathlib import Path
+
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from app.agent.loop import reset_conversation, run_turn
 from app.db import get_db
 from app.models import Shipment
-from app.schemas import ShipmentDetailOut, ShipmentSummaryOut, TrackingOut
-from app.tools import build_tracking_response
+from app.schemas import (
+    ChatRequest,
+    ChatResponse,
+    ResetRequest,
+    ShipmentDetailOut,
+    ShipmentSummaryOut,
+    TrackingOut,
+)
+from app.tools import build_tracking_response, submit_document
+
+# Uploaded documents are kept out of the repository.
+UPLOAD_DIR = Path("uploads")
 
 app = FastAPI(
     title="IndiaShipments Agent API",
     version="0.1.0",
     description="Backend for the IndiaShipments conversational shipment agent.",
 )
+
+
+@app.post("/chat", response_model=ChatResponse)
+def chat(request: ChatRequest) -> ChatResponse:
+    """One conversational turn.
+
+    The agent loop runs here; the UI stays a thin client that renders whatever
+    this returns, including the selectable options and the live draft state.
+    """
+    try:
+        result = run_turn(request.session_id, request.message)
+    except RuntimeError as exc:  # missing API key, misconfiguration
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return ChatResponse(**result)
+
+
+@app.post("/chat/upload", response_model=ChatResponse)
+async def chat_upload(
+    session_id: str = Form(...),
+    doc_type: str = Form(...),
+    file: UploadFile = File(...),
+) -> ChatResponse:
+    """Attach a supporting document to the conversation's draft.
+
+    The file arrives here rather than through the model: a model cannot be
+    handed a file and asked to vouch for it. The tool records it, and the agent
+    is then told what happened so it can respond in the conversation.
+    """
+    payload = await file.read()
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    stored_path = UPLOAD_DIR / f"{session_id}-{doc_type}-{file.filename}"
+    stored_path.write_bytes(payload)
+
+    result = submit_document(
+        session_id=session_id,
+        doc_type=doc_type,
+        filename=file.filename,
+        stored_path=str(stored_path),
+        size_bytes=len(payload),
+        content_type=file.content_type,
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error"))
+
+    return ChatResponse(
+        **run_turn(
+            session_id,
+            f"[The user has attached a file named '{file.filename}' for the "
+            f"{doc_type} requirement. It has been received and recorded.]",
+        )
+    )
+
+
+@app.post("/chat/reset")
+def chat_reset(request: ResetRequest) -> dict:
+    """Start the conversation over, discarding its transcript and draft."""
+    reset_conversation(request.session_id)
+    return {"ok": True, "session_id": request.session_id}
 
 
 @app.get("/health")

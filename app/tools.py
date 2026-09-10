@@ -207,12 +207,57 @@ def save_draft(
         draft = _draft_as_dict(shipment)
         result = validate_draft(draft)
 
-        return {
+        as_dict = result.as_dict()
+        payload = {
             "ok": True,
             "draft": draft,
-            "still_missing": result.as_dict()["missing_readable"],
+            "still_missing_count": len(as_dict["missing_readable"]),
+            "ask_next": as_dict["ask_next"],
+            "ask_next_options": as_dict["ask_next_options"],
+            "ask_next_instruction": as_dict["ask_next_instruction"],
             "note": "Draft saved. It must be validated again before booking.",
         }
+
+        # Screening the contents here as well as in validate_shipment means the
+        # verdict on a prohibited or restricted item always reaches the model as
+        # a tool result. Otherwise a model that answers straight after saving
+        # would be stating a rule from its own knowledge rather than from ours.
+        if shipment.contents:
+            decision = classify_contents(shipment.contents)
+            payload["contents_check"] = {
+                "decision": decision.decision,
+                "reasons": decision.reasons,
+                "requires_document": decision.requires_document,
+                "note": (
+                    "Use these reasons verbatim when explaining what can or "
+                    "cannot be sent. Do not add rules of your own."
+                ),
+            }
+
+        return payload
+
+
+def check_contents(description: str) -> dict:
+    """Screen a description of the contents against the acceptance rules.
+
+    Read-only and cheap, so the agent can consult it before saying anything
+    about whether an item may be sent. Without this the model answers from its
+    own knowledge of postal regulations, which is exactly what the brief
+    forbids.
+    """
+    decision = classify_contents(description)
+    return {
+        "ok": True,
+        "description": description,
+        "decision": decision.decision,
+        "reasons": decision.reasons,
+        "requires_document": decision.requires_document,
+        "note": (
+            "These reasons are the only grounds you may give. Do not cite "
+            "regulations, authorities or classifications that are not stated "
+            "here."
+        ),
+    }
 
 
 def get_summary(session_id: str) -> dict:
@@ -233,6 +278,9 @@ def get_summary(session_id: str) -> dict:
             "insurance_acknowledged": shipment.insurance_ack,
             "pending_documents": [d.doc_type for d in pending],
             "still_missing": result.as_dict()["missing_readable"],
+            "ask_next": result.as_dict()["ask_next"],
+            "ask_next_options": result.as_dict()["ask_next_options"],
+            "ask_next_instruction": result.as_dict()["ask_next_instruction"],
             "ready_to_book": (
                 shipment.validated
                 and not pending

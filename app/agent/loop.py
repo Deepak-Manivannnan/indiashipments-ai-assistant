@@ -1,0 +1,380 @@
+"""The agent loop.
+
+One user message in, one structured reply out. In between, the model may call
+tools as many times as it needs. The loop executes them, feeds the results
+back, and repeats until the model produces prose.
+
+Nothing here decides whether an action is allowed -- the tools do that. This
+module's jobs are: inject the session, keep the transcript, cap the loop, and
+shape the response the UI needs.
+"""
+
+import logging
+import re
+import time
+from dataclasses import dataclass, field
+
+from google import genai
+from google.genai import errors as genai_errors
+from google.genai import types
+
+from app import tools
+from app.agent.declarations import CALLABLE_TOOLS, DECLARATIONS, SESSION_SCOPED
+from app.agent.prompt import SYSTEM_PROMPT
+from app.config import get_settings
+from app.db import SessionLocal
+from app.models import ConversationState
+from app.rules import HIGH_VALUE_THRESHOLD_INR
+
+logger = logging.getLogger(__name__)
+
+# A turn that has not settled after this many rounds is stopped, so a model
+# that loops on a failing tool cannot spin indefinitely.
+MAX_TOOL_ROUNDS = 8
+
+# Gemini can return a STOP with no content; ask again before giving up.
+EMPTY_RESPONSE_RETRIES = 2
+
+_client: genai.Client | None = None
+
+
+def get_client() -> genai.Client:
+    global _client
+    if _client is None:
+        settings = get_settings()
+        if not settings.gemini_api_key:
+            raise RuntimeError(
+                "GEMINI_API_KEY is not set. Add it to .env before using the agent."
+            )
+        _client = genai.Client(api_key=settings.gemini_api_key)
+    return _client
+
+
+class ModelUnavailable(Exception):
+    """The model could not be reached. The draft is untouched and still valid."""
+
+
+# The free tier allows only a handful of requests per minute, and every tool
+# round costs one. Rather than failing the turn, wait for the window the API
+# itself names and try again.
+RATE_LIMIT_RETRIES = 2
+MAX_RETRY_WAIT_SECONDS = 45
+
+
+def _retry_delay_from(error: genai_errors.APIError) -> float | None:
+    match = re.search(r"'retryDelay':\s*'(\d+(?:\.\d+)?)s'", str(error))
+    return float(match.group(1)) if match else None
+
+
+# Turning thinking off saves latency and tokens, but only some models accept
+# the setting -- others reject the whole request. Which is which is discovered
+# once, on the first rejection, rather than hard-coded per model name.
+_thinking_budget_supported: bool | None = None
+
+
+def _generate(client, model, contents, build_config):
+    """One model call.
+
+    Retries while the API says the quota will free up, and drops the thinking
+    setting if this model rejects it.
+    """
+    global _thinking_budget_supported
+
+    for attempt in range(RATE_LIMIT_RETRIES + 1):
+        include_thinking = _thinking_budget_supported is not False
+        try:
+            return client.models.generate_content(
+                model=model, contents=contents, config=build_config(include_thinking)
+            )
+        except genai_errors.ClientError as exc:
+            if exc.code == 429:
+                if attempt == RATE_LIMIT_RETRIES:
+                    raise ModelUnavailable(
+                        "The language model is rate limited right now."
+                    ) from exc
+                wait = min(_retry_delay_from(exc) or 20.0, MAX_RETRY_WAIT_SECONDS) + 1
+                logger.warning("Rate limited by Gemini; waiting %.0fs", wait)
+                time.sleep(wait)
+                continue
+
+            if exc.code == 400 and include_thinking and _thinking_budget_supported is None:
+                logger.info("%s rejects thinking_budget; retrying without it", model)
+                _thinking_budget_supported = False
+                continue
+
+            # Anything else is a real fault. Log it in full -- masking a 400 as
+            # "service unavailable" once cost an afternoon.
+            logger.error("Gemini rejected the request (%s): %s", exc.code, exc)
+            raise ModelUnavailable(f"The model rejected the request: {exc}") from exc
+
+        except genai_errors.ServerError as exc:
+            if attempt == RATE_LIMIT_RETRIES:
+                raise ModelUnavailable("The language model is unavailable.") from exc
+            logger.warning("Gemini server error, retrying: %s", exc)
+            time.sleep(2 * (attempt + 1))
+
+    raise ModelUnavailable("The language model is unavailable.")
+
+
+@dataclass
+class ToolCallRecord:
+    """One executed tool call, surfaced to the UI for transparency."""
+
+    name: str
+    args: dict
+    ok: bool
+    result: dict = field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Transcript persistence
+# ---------------------------------------------------------------------------
+
+def load_history(session_id: str) -> list[types.Content]:
+    db = SessionLocal()
+    try:
+        state = db.get(ConversationState, session_id)
+        raw = (state.history_json if state else None) or []
+    finally:
+        db.close()
+    return [types.Content.model_validate(item) for item in raw]
+
+
+def save_history(session_id: str, history: list[types.Content]) -> None:
+    db = SessionLocal()
+    try:
+        state = db.get(ConversationState, session_id)
+        if state is None:
+            state = ConversationState(session_id=session_id)
+            db.add(state)
+        state.history_json = [c.model_dump(mode="json", exclude_none=True) for c in history]
+        db.commit()
+    finally:
+        db.close()
+
+
+def reset_conversation(session_id: str) -> None:
+    db = SessionLocal()
+    try:
+        state = db.get(ConversationState, session_id)
+        if state is not None:
+            db.delete(state)
+            db.commit()
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# Tool execution
+# ---------------------------------------------------------------------------
+
+def execute_tool(name: str, args: dict, session_id: str) -> dict:
+    """Run one tool. A failure becomes a readable result, never an exception."""
+    function = CALLABLE_TOOLS.get(name)
+    if function is None:
+        return {"ok": False, "error": f"There is no tool called '{name}'."}
+
+    call_args = dict(args)
+    if name in SESSION_SCOPED:
+        call_args["session_id"] = session_id
+
+    try:
+        result = function(**call_args)
+    except TypeError as exc:
+        return {"ok": False, "error": f"{name} was called with wrong arguments: {exc}"}
+    except Exception as exc:
+        logger.exception("Tool %s failed", name)
+        return {
+            "ok": False,
+            "error": (
+                f"{name} could not complete because of an internal error: {exc}. "
+                "Tell the user plainly and do not claim it succeeded."
+            ),
+        }
+
+    return result if isinstance(result, dict) else {"ok": True, "result": result}
+
+
+# ---------------------------------------------------------------------------
+# Response shaping
+# ---------------------------------------------------------------------------
+
+def _build_state(session_id: str, reference: str | None) -> dict:
+    """The live draft panel's data, read straight from the database."""
+    summary = tools.get_summary(session_id)
+    if not summary.get("ok"):
+        return {
+            "has_draft": False,
+            "validated": False,
+            "blockers": [],
+            "still_missing": [],
+            "ready_to_book": False,
+            "reference": reference,
+        }
+
+    blockers = [f"{d} required" for d in summary.get("pending_documents", [])]
+    if not summary.get("insurance_acknowledged"):
+        draft = summary.get("draft") or {}
+        value = draft.get("declared_value")
+        if value is not None and float(value) > HIGH_VALUE_THRESHOLD_INR:
+            blockers.append("insurance acknowledgement required")
+
+    return {
+        "has_draft": True,
+        "draft": summary.get("draft"),
+        "validated": summary.get("validated"),
+        "blockers": blockers,
+        "still_missing": summary.get("still_missing", []),
+        "ready_to_book": summary.get("ready_to_book"),
+        "reference": reference,
+    }
+
+
+def _options_from(calls: list[ToolCallRecord]) -> tuple[list[str], str | None]:
+    """Selectable choices come from the app's own lists, via `list_options`."""
+    for call in reversed(calls):
+        if call.name == "list_options" and call.ok:
+            return call.result.get("options", []), call.result.get("field")
+    return [], None
+
+
+# ---------------------------------------------------------------------------
+# The loop
+# ---------------------------------------------------------------------------
+
+def run_turn(session_id: str, message: str) -> dict:
+    """Process one user message and return the structured reply."""
+    settings = get_settings()
+    client = get_client()
+
+    history = load_history(session_id)
+    history.append(types.Content(role="user", parts=[types.Part(text=message)]))
+
+    def build_config(include_thinking: bool) -> types.GenerateContentConfig:
+        options = dict(
+            system_instruction=SYSTEM_PROMPT,
+            tools=[types.Tool(function_declarations=DECLARATIONS)],
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                disable=True
+            ),
+            temperature=0.3,
+        )
+        if include_thinking:
+            # Extended thinking adds latency and token cost without helping
+            # here: the reasoning this agent needs lives in the tools.
+            options["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+        return types.GenerateContentConfig(**options)
+
+    executed: list[ToolCallRecord] = []
+    booked_reference: str | None = None
+    reply = ""
+    empty_responses = 0
+
+    for _ in range(MAX_TOOL_ROUNDS):
+        try:
+            response = _generate(client, settings.gemini_model, history, build_config)
+        except ModelUnavailable:
+            # Everything the user has told us is already in the database, so the
+            # draft survives; only this turn is lost.
+            return {
+                "reply": (
+                    "I can't reach the assistant service at the moment, so I "
+                    "couldn't process that message. Nothing you've told me has "
+                    "been lost -- your draft is saved. Please try again in a "
+                    "moment."
+                ),
+                "options": [],
+                "expects": None,
+                "allow_free_text": True,
+                "state": _build_state(session_id, None),
+                "tool_calls": [],
+                "degraded": True,
+            }
+
+        candidate = response.candidates[0] if response.candidates else None
+        parts = (candidate.content.parts if candidate and candidate.content else None) or []
+        function_calls = [p.function_call for p in parts if p.function_call]
+
+        if not parts:
+            # Gemini occasionally returns a STOP with no content at all. An empty
+            # turn must not be written into the transcript, so ask again rather
+            # than corrupting the history with a blank model message.
+            empty_responses += 1
+            logger.warning(
+                "Empty model response (%d) for session %s", empty_responses, session_id
+            )
+            if empty_responses <= EMPTY_RESPONSE_RETRIES:
+                continue
+            reply = (
+                "Sorry, I didn't manage to put that into words. Could you say "
+                "that again?"
+            )
+            break
+
+        history.append(candidate.content)
+
+        if not function_calls:
+            reply = "".join(p.text for p in parts if p.text).strip()
+            break
+
+        response_parts = []
+        for call in function_calls:
+            args = dict(call.args or {})
+            result = execute_tool(call.name, args, session_id)
+            executed.append(
+                ToolCallRecord(
+                    name=call.name,
+                    args=args,
+                    ok=bool(result.get("ok")),
+                    result=result,
+                )
+            )
+            if call.name == "confirm_booking" and result.get("ok"):
+                booked_reference = result.get("reference")
+
+            response_parts.append(
+                types.Part.from_function_response(name=call.name, response=result)
+            )
+
+        history.append(types.Content(role="user", parts=response_parts))
+    else:
+        # The model never settled on a reply within the cap.
+        reply = (
+            "I'm having trouble completing that step right now. Could you tell me "
+            "again what you'd like to do, and I'll pick it up from there?"
+        )
+
+    if not reply:
+        reply = (
+            "Sorry, I didn't manage to put that into words. Could you say that "
+            "again?"
+        )
+
+    save_history(session_id, history)
+
+    last_error = next(
+        (c.result.get("error") for c in reversed(executed) if not c.ok), None
+    )
+    if last_error:
+        db = SessionLocal()
+        try:
+            state = db.get(ConversationState, session_id)
+            if state:
+                state.last_tool_error = last_error
+                db.commit()
+        finally:
+            db.close()
+
+    options, expects = _options_from(executed)
+
+    return {
+        "reply": reply,
+        "options": options,
+        "expects": expects,
+        "allow_free_text": True,
+        "state": _build_state(session_id, booked_reference),
+        "tool_calls": [
+            {"name": c.name, "args": c.args, "ok": c.ok, "result": c.result}
+            for c in executed
+        ],
+    }

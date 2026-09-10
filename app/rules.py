@@ -210,10 +210,63 @@ FIELD_LABELS = {
     "package.length_mm": "package length",
     "package.width_mm": "package width",
     "package.height_mm": "package height",
+    "package.dimensions": "package size -- length, width and height together",
     "service_type": "service type (Standard or Express)",
     "contents": "what the parcel contains",
     "declared_value": "declared value in INR",
 }
+
+
+# The order in which missing details are asked for. Contents comes first: it is
+# the only field that can rule the whole shipment out, and asking eighteen
+# questions before discovering the parcel cannot be sent wastes the user's time.
+ASK_ORDER = [
+    "contents",
+    "package.weight_g",
+    "package.length_mm",
+    "package.width_mm",
+    "package.height_mm",
+    "declared_value",
+    "service_type",
+    "sender.name",
+    "sender.phone",
+    "sender.address",
+    "sender.city",
+    "sender.pin",
+    "sender.state",
+    "recipient.name",
+    "recipient.phone",
+    "recipient.address",
+    "recipient.city",
+    "recipient.pin",
+    "recipient.state",
+]
+
+# Missing fields that have a fixed list of choices to offer.
+FIELD_OPTION_LISTS = {
+    "contents": "contents_category",
+    "service_type": "service_type",
+}
+
+
+# Fields that are natural to give together. Asking for length, then width, then
+# height as three separate turns is technically "one question at a time" and
+# awful to sit through.
+FIELD_GROUPS = {
+    "package.length_mm": "package.dimensions",
+    "package.width_mm": "package.dimensions",
+    "package.height_mm": "package.dimensions",
+}
+
+
+def next_field_to_ask(missing: list[str]) -> str | None:
+    """The single next thing to ask about, in a sensible order."""
+    ranked = sorted(
+        missing, key=lambda f: ASK_ORDER.index(f) if f in ASK_ORDER else len(ASK_ORDER)
+    )
+    if not ranked:
+        return None
+    return FIELD_GROUPS.get(ranked[0], ranked[0])
 
 
 @dataclass
@@ -234,10 +287,29 @@ class ValidationResult:
     contents_decision: str = "allowed"
 
     def as_dict(self) -> dict:
+        next_field = next_field_to_ask(self.missing)
         return {
             "ok": self.ok,
             "missing": self.missing,
             "missing_readable": [FIELD_LABELS.get(m, m) for m in self.missing],
+            # Deliberately singular. The agent is told what to ask for next, one
+            # item at a time, rather than being handed the whole list to recite.
+            "ask_next": FIELD_LABELS.get(next_field, next_field) if next_field else None,
+            "ask_next_field": next_field,
+            "ask_next_options": FIELD_OPTION_LISTS.get(next_field),
+            "ask_next_instruction": (
+                "Ask the user for this one item only. Do not ask for anything "
+                "else in the same message, and do not list what is still "
+                "outstanding."
+                + (
+                    " This field has a fixed list of choices: call list_options "
+                    f"with field='{FIELD_OPTION_LISTS[next_field]}' and offer them."
+                    if next_field in FIELD_OPTION_LISTS
+                    else ""
+                )
+                if next_field
+                else None
+            ),
             "errors": self.errors,
             "warnings": self.warnings,
             "requires_document": self.requires_document,
