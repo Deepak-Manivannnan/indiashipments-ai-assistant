@@ -264,6 +264,21 @@ def bind_session(session_id: str, customer_id: int) -> dict:
         return {"ok": True, "session_id": session_id, "customer": customer.name}
 
 
+def session_customer_id(session_id: str) -> int | None:
+    """Who, if anyone, is signed in on this conversation.
+
+    Lets the application restore a sign-in after a browser refresh, since the
+    conversation and its owner are held in the database rather than in the
+    page.
+    """
+    db = SessionLocal()
+    try:
+        state = db.get(ConversationState, session_id)
+        return state.customer_id if state else None
+    finally:
+        db.close()
+
+
 def prefill_sender_from_profile(session_id: str) -> dict:
     """Fill the sender block from the signed-in customer's saved details.
 

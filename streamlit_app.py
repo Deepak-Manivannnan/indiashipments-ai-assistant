@@ -81,6 +81,7 @@ def _navigation() -> None:
                     for key in ("customer", "session_id", "messages", "state",
                                 "options", "greeted"):
                         st.session_state.pop(key, None)
+                    st.query_params.clear()
                     st.session_state["page"] = "home"
                     st.rerun()
         elif st.button("Sign in", use_container_width=True, type="secondary"):
@@ -88,6 +89,42 @@ def _navigation() -> None:
             st.rerun()
 
     st.markdown('<div class="is-navrule"></div>', unsafe_allow_html=True)
+
+
+def _restore_session() -> None:
+    """Bring a signed-in customer back after a browser refresh.
+
+    Streamlit discards its session state on reload, so the conversation id is
+    carried in the URL. The conversation and its owner live in the database,
+    which makes the id enough to restore who is signed in -- and the draft
+    shipment they were part-way through.
+    """
+    if st.session_state.get("customer"):
+        return
+
+    session_id = st.query_params.get("sid")
+    if not session_id:
+        return
+
+    try:
+        customer = api.session_customer(session_id)
+    except api.BackendUnavailable:
+        return
+    if customer is None:
+        st.query_params.clear()
+        return
+
+    st.session_state["customer"] = customer
+    st.session_state["session_id"] = session_id
+    page = st.query_params.get("page")
+    if page in PAGES:
+        st.session_state["page"] = page
+
+
+def _remember_page(page: str) -> None:
+    """Keep the URL in step, so a refresh lands where the user was."""
+    if st.session_state.get("customer") and st.query_params.get("page") != page:
+        st.query_params["page"] = page
 
 
 def _backend_warning() -> None:
@@ -110,12 +147,14 @@ def main() -> None:
     st.session_state.setdefault("page", "home")
 
     _backend_warning()
+    _restore_session()
     _navigation()
 
     page = st.session_state["page"]
     if page in PRIVATE and not st.session_state.get("customer"):
         page = "signin"
 
+    _remember_page(page)
     PAGES[page][1]()
 
 

@@ -13,7 +13,12 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.agent.loop import reset_conversation, run_turn
-from app.auth import authenticate, create_customer, list_demo_accounts
+from app.auth import (
+    authenticate,
+    create_customer,
+    get_customer,
+    list_demo_accounts,
+)
 from app.db import get_db
 from app.models import Shipment
 from app.schemas import (
@@ -30,6 +35,7 @@ from app.tools import (
     bind_session,
     build_tracking_response,
     list_my_shipments,
+    session_customer_id,
     submit_document,
 )
 
@@ -79,6 +85,22 @@ def chat_bind(request: ChatRequest) -> dict:
     if not result["ok"]:
         raise HTTPException(status_code=404, detail=result["error"])
     return result
+
+
+@app.get("/chat/session")
+def chat_session(session_id: str) -> dict:
+    """Who is signed in on this conversation.
+
+    The interface calls this after a browser refresh to restore the sign-in,
+    rather than making the customer log in again every time they reload.
+    """
+    customer_id = session_customer_id(session_id)
+    if customer_id is None:
+        raise HTTPException(status_code=404, detail="that session is not signed in")
+    customer = get_customer(customer_id)
+    if customer is None:
+        raise HTTPException(status_code=404, detail="that customer no longer exists")
+    return {"ok": True, "customer": customer}
 
 
 @app.get("/me/shipments")

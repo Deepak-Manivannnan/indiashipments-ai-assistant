@@ -5,6 +5,8 @@ for testing, but their credentials are deliberately not shown here -- they are
 listed in the setup instructions, not in the product.
 """
 
+import uuid
+
 import streamlit as st
 
 from ui import api, styles
@@ -16,6 +18,13 @@ def _sign_in_as(customer: dict) -> None:
     # sessions, though any unfinished draft is still held in the database.
     for key in ("session_id", "messages", "state", "options", "greeted"):
         st.session_state.pop(key, None)
+
+    # The conversation is created and bound now rather than when ISA is first
+    # opened, so its id can go into the URL and survive a page refresh.
+    session_id = f"ui-{uuid.uuid4().hex[:16]}"
+    if api.bind_session(session_id, customer["id"]):
+        st.session_state["session_id"] = session_id
+        st.query_params["sid"] = session_id
     # Land on the home page, like any other site. ISA opens only when the
     # user chooses to open it.
     st.session_state["page"] = "home"

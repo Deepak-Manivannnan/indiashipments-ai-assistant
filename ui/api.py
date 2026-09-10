@@ -67,6 +67,12 @@ def bind_session(session_id: str, customer_id: int) -> bool:
     return ok
 
 
+def session_customer(session_id: str) -> dict | None:
+    """The signed-in customer for a conversation, or None."""
+    ok, payload = _request("GET", "/chat/session", params={"session_id": session_id})
+    return payload.get("customer") if ok else None
+
+
 def send_message(session_id: str, message: str, customer_id: int | None) -> dict:
     ok, payload = _request(
         "POST",

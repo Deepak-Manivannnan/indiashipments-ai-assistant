@@ -36,7 +36,16 @@ CSS = f"""
   /* Streamlit's own toolbar overlaps the first row, which was clipping the
      navigation buttons. Push the content below it. */
   .block-container {{ padding-top: 4.2rem; max-width: 1200px; }}
-  header[data-testid="stHeader"] {{ background: transparent; height: 0; }}
+  header[data-testid="stHeader"] {{
+      background: transparent; height: 0;
+      /* It stays in the layer above the page whatever its height, so let
+         clicks pass straight through to whatever is underneath. */
+      pointer-events: none;
+  }}
+  /* ...except its own controls, which must still be usable. */
+  header[data-testid="stHeader"] [data-testid="stToolbar"],
+  header[data-testid="stHeader"] button,
+  header[data-testid="stHeader"] a {{ pointer-events: auto; }}
   h1, h2, h3 {{ color: {INK}; letter-spacing: -0.01em; }}
 
   /* --- brand + navigation --- */
@@ -180,7 +189,7 @@ CHAT_LAYOUT_CSS = """
      height back for the transcript. The main container is deliberately left
      scrollable: forcing overflow:hidden once put the composer out of reach. */
   section[data-testid="stMain"] .block-container {{
-      padding-top: 0.7rem !important;
+      padding-top: 1.9rem !important;
       padding-bottom: 0.3rem !important;
   }}
   .is-navrule {{ margin: .35rem 0 .8rem 0 !important; }}
@@ -223,7 +232,7 @@ def _chat_layout_css(offset: int) -> str:
 # Space taken by everything else on the page. Banners and the upload control
 # appear conditionally, so the transcript gives up height to make room rather
 # than pushing the composer off the bottom of the window.
-BASE_CHAT_OFFSET = 470
+BASE_CHAT_OFFSET = 490
 BANNER_HEIGHT = 62
 UPLOADER_HEIGHT = 110
 
