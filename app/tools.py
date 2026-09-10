@@ -167,8 +167,8 @@ def _gate_on_sender_choice(db, session_id: str, shipment: Shipment,
         return payload
 
     sender = shipment.sender_json or {}
-    if any(sender.get(field) for field in ("name", "phone", "address", "pin")):
-        return payload  # they have already answered, one way or the other
+    if sender.get("name") and sender.get("phone"):
+        return payload  # we know who is sending and how to reach them
 
     state = _get_state(db, session_id)
     if state.customer_id is None:
@@ -177,15 +177,20 @@ def _gate_on_sender_choice(db, session_id: str, shipment: Shipment,
     if customer is None or not (customer.address and customer.pin):
         return payload  # nothing saved to offer
 
+    known = ", ".join(
+        filter(None, [customer.name, customer.phone, customer.address,
+                      customer.city, customer.pin])
+    )
     payload["awaiting_sender_choice"] = True
-    payload["ask_next"] = "whose address the parcel is going from"
+    payload["ask_next"] = "whether the sender is this customer"
     payload["ask_next_options"] = "sender_address"
     payload["ask_next_instruction"] = (
-        f"This customer has an address saved: {customer.address}, "
-        f"{customer.city} {customer.pin}. Ask whether we are collecting from "
-        "there or from a different address, and ask NOTHING else until they "
-        "answer. Call prefill_sender_from_profile only if they choose their "
-        "saved address; otherwise collect the sender's details normally."
+        f"This customer's saved details are: {known}. Ask whether they are the "
+        "sender, so their own name, number and address can be used, or whether "
+        "someone else is sending. Ask NOTHING else until they answer. If they "
+        "are the sender, call prefill_sender_from_profile -- it fills only the "
+        "blanks, so anything they have already told you is kept. Otherwise "
+        "collect the sender's details from them."
     )
     return payload
 
@@ -412,11 +417,17 @@ def prefill_sender_from_profile(session_id: str) -> dict:
 
         sender = customer.as_sender()
         missing = [key for key, value in sender.items() if not value]
+        # Only blanks are filled. A customer who has already given a pickup
+        # address must not have it replaced by the one on their profile.
+        draft = _get_draft(db, session_id)
+        already = (draft.sender_json if draft else None) or {}
+        to_apply = {
+            f"sender_{key}": value
+            for key, value in sender.items()
+            if value and not already.get(key)
+        }
 
-    saved = save_draft(
-        session_id=session_id,
-        **{f"sender_{key}": value for key, value in sender.items() if value},
-    )
+    saved = save_draft(session_id=session_id, **to_apply) if to_apply else {}
     return {
         "ok": True,
         "sender": sender,
@@ -647,6 +658,22 @@ def validate_shipment(session_id: str) -> dict:
                 continue
             looked_up = pin_api.lookup_pin(pin)
             pin_checks[role] = pin_api.compare_city(looked_up, person.get("city"))
+
+            # The lookup gives us the city and state for that PIN. Asking the
+            # customer for them afterwards is asking for something we hold.
+            # Only blanks are filled: whatever they told us stands.
+            if looked_up.get("status") == pin_api.STATUS_OK:
+                filled = dict(person)
+                for field, value in (("city", looked_up.get("city")),
+                                     ("state", looked_up.get("state"))):
+                    if value and not filled.get(field):
+                        filled[field] = value
+                if filled != person:
+                    draft[role] = filled
+                    if role == "sender":
+                        shipment.sender_json = filled
+                    else:
+                        shipment.recipient_json = filled
         draft["pin_checks"] = pin_checks
 
         result = validate_draft(draft)
@@ -1059,7 +1086,7 @@ def list_options(field: str) -> dict:
         "service_type": SERVICE_TYPES,
         "contents_category": CONTENTS_CATEGORIES,
         "insurance": ["Yes, I acknowledge", "No, reduce the declared value"],
-        "sender_address": ["Use my saved address", "A different address"],
+        "sender_address": ["I'm the sender", "Someone else is sending"],
     }
     if field not in catalogue:
         return _fail(
