@@ -180,24 +180,50 @@ def chip(status: str) -> str:
 
 CHAT_LAYOUT_CSS = """
 <style>
-  /* The assistant page is sized to the viewport so the transcript is the only
-     thing that scrolls. The main container is deliberately NOT set to
-     overflow:hidden -- doing so put the composer out of reach entirely. */
+  /* The assistant page is sized to fit the window, so the page itself has
+     nothing to scroll and only the transcript moves. The main container is
+     deliberately left scrollable: forcing overflow:hidden here once put the
+     composer out of reach entirely. */
+  section[data-testid="stMain"] .block-container {{
+      padding-top: 1.6rem !important;
+      padding-bottom: 0.4rem !important;
+  }}
+
+  /* Everything above the transcript inside its column -- title row, banners --
+     plus the composer beneath it, comes to roughly 360px. */
   .st-key-isa-transcript {{
-      height: calc(100vh - 430px) !important;
-      min-height: 240px;
+      height: calc(100vh - {offset}px) !important;
+      min-height: 220px;
+      max-height: 620px;
       border: 1px solid {border}; border-radius: 12px;
       padding: .7rem .9rem; background: #fff;
   }}
-  /* The composer is pinned to the bottom of the window, so it is always
-     visible however long the conversation gets. */
-  div[data-testid="stBottomBlockContainer"] {{
-      padding-bottom: .6rem; padding-top: .4rem;
-  }}
+
+  /* Sit the composer directly under the transcript rather than letting it
+     stretch across the window. */
+  div[data-testid="stChatInput"] {{ margin-top: .5rem; }}
+  div[data-testid="stChatInput"] textarea {{ font-size: .93rem; }}
 </style>
-""".format(border=BORDER)
+"""
 
 
-def inject_chat_layout() -> None:
+def _chat_layout_css(offset: int) -> str:
+    return CHAT_LAYOUT_CSS.format(border=BORDER, offset=offset)
+
+
+# Space taken by everything else on the page. Banners and the upload control
+# appear conditionally, so the transcript gives up height to make room rather
+# than pushing the composer off the bottom of the window.
+BASE_CHAT_OFFSET = 380
+BANNER_HEIGHT = 62
+UPLOADER_HEIGHT = 110
+
+
+def inject_chat_layout(banners: int = 0, uploader: bool = False) -> None:
     """Extra styling used only by the assistant page."""
-    st.markdown(CHAT_LAYOUT_CSS, unsafe_allow_html=True)
+    offset = (
+        BASE_CHAT_OFFSET
+        + banners * BANNER_HEIGHT
+        + (UPLOADER_HEIGHT if uploader else 0)
+    )
+    st.markdown(_chat_layout_css(offset), unsafe_allow_html=True)

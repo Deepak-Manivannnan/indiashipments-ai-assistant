@@ -139,17 +139,21 @@ def _banners(state: dict) -> None:
         )
 
 
-def _document_upload(state: dict) -> None:
-    """Appears only while a document is actually outstanding."""
-    blockers = state.get("blockers") or []
-    document = next(
+def _outstanding_document(state: dict) -> str | None:
+    """The document the booking is waiting on, if any."""
+    return next(
         (
             b.replace(" required", "")
-            for b in blockers
+            for b in (state.get("blockers") or [])
             if b.endswith("required") and "insurance" not in b
         ),
         None,
     )
+
+
+def _document_upload(state: dict) -> None:
+    """Appears only while a document is actually outstanding."""
+    document = _outstanding_document(state)
     if not document:
         return
 
@@ -233,7 +237,6 @@ def _panel(state: dict) -> None:
 
 def render() -> None:
     styles.inject()
-    styles.inject_chat_layout()
     _ensure_session()
 
     if not components.require_sign_in("use ISA"):
@@ -241,6 +244,14 @@ def render() -> None:
 
     _greeting()
     state = st.session_state.get("state") or {}
+
+    # Tell the stylesheet how much room the conditional pieces need, so the
+    # transcript shrinks instead of the page growing a scrollbar.
+    blockers = state.get("blockers") or []
+    styles.inject_chat_layout(
+        banners=len(blockers) + (1 if state.get("stub_mode") else 0),
+        uploader=bool(_outstanding_document(state)),
+    )
 
     left, right = st.columns([1.6, 1], gap="large")
 
@@ -257,14 +268,12 @@ def render() -> None:
         _transcript()
         _document_upload(state)
         chosen = _options()
+        # Inside the column, so the composer is the width of the conversation
+        # rather than the width of the window.
+        typed = st.chat_input("Type your message, or pick an option above")
 
     with right:
         _panel(state)
-
-    # Outside the columns on purpose: at the top level Streamlit pins the
-    # composer to the bottom of the window, so it stays visible however long
-    # the conversation runs.
-    typed = st.chat_input("Type your message, or pick an option above")
 
     message = chosen or typed
     if message:
