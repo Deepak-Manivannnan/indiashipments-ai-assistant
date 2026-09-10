@@ -249,3 +249,45 @@ def test_no_price_is_shown_when_the_distance_cannot_be_found(signed_in_session,
     state = loop._build_state(signed_in_session, None)
     assert state["distance_km"] is None
     assert state["estimated_price_inr"] is None
+
+
+# ---------------------------------------------------------------------------
+# Choices made on our own buttons
+# ---------------------------------------------------------------------------
+
+def test_tapping_a_category_records_it(signed_in_session):
+    """The buttons are ours, so their answers are ours to record.
+
+    Regression: a customer tapped Medicines, was told a prescription was
+    needed, and the contents stayed blank because the model screened the word
+    without saving it.
+    """
+    tools.save_draft(signed_in_session, weight_g=5000)
+    loop._record_chosen_option(signed_in_session, "Medicines")
+
+    summary = tools.get_summary(signed_in_session)
+    assert summary["draft"]["contents"] == "Medicines"
+    assert summary["awaiting_document"] == "prescription"
+
+    loop._record_chosen_option(signed_in_session, "Express")
+    assert tools.get_summary(signed_in_session)["draft"]["service_type"] == "Express"
+
+
+def test_other_says_nothing_about_the_contents(signed_in_session):
+    tools.save_draft(signed_in_session, weight_g=5000)
+    loop._record_chosen_option(signed_in_session, "Other")
+    assert not tools.get_summary(signed_in_session)["draft"]["contents"]
+
+
+def test_no_buttons_are_offered_while_a_document_is_outstanding(signed_in_session):
+    """Contents categories under "please attach the prescription" answer a
+    question nobody asked."""
+    tools.save_draft(signed_in_session, contents="Medicines", weight_g=5000)
+    state = loop._build_state(signed_in_session, None)
+
+    stale = [loop.ToolCallRecord(
+        name="list_options", args={"field": "contents_category"}, ok=True,
+        result=tools.list_options("contents_category"),
+    )]
+    options, _ = loop._options_for(stale, state)
+    assert options == []

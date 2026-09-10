@@ -303,6 +303,12 @@ def _options_for(calls: list[ToolCallRecord], state: dict) -> tuple[list[str], s
         if listed.get("ok"):
             return listed.get("options", []), field
 
+    if state.get("has_draft"):
+        # The draft knows what is being asked, and it says this question has no
+        # fixed choices. Showing the model's last list here would offer answers
+        # to a question nobody asked.
+        return [], None
+
     for call in reversed(calls):
         if call.name == "list_options" and call.ok:
             return call.result.get("options", []), call.result.get("field")
@@ -323,6 +329,28 @@ ASKS_IF_ALLOWED = re.compile(
     r"|\bdo you (accept|carry|take)\b",
     re.IGNORECASE,
 )
+
+
+def _record_chosen_option(session_id: str, message: str) -> None:
+    """Save an answer the customer picked from our own list.
+
+    The buttons come from the application, so their labels map onto fields we
+    own. Relying on the model to pass the choice through to save_draft meant a
+    customer could tap "Medicines", be told a prescription was needed, and
+    still have the contents recorded as blank.
+    """
+    from app.rules import CONTENTS_CATEGORIES
+
+    answer = message.strip()
+    lowered = answer.lower()
+
+    if any(lowered == option.lower() for option in CONTENTS_CATEGORIES):
+        if lowered != "other":  # "Other" says nothing about the contents
+            tools.save_draft(session_id=session_id, contents=answer)
+        return
+
+    if lowered in {"standard", "express"}:
+        tools.save_draft(session_id=session_id, service_type=answer.capitalize())
 
 
 def _acceptance_note(message: str) -> str:
@@ -390,6 +418,8 @@ def run_turn(session_id: str, message: str) -> dict:
         client = get_client()
     except ModelUnavailable as exc:
         return _degraded(session_id, exc)
+
+    _record_chosen_option(session_id, message)
 
     history = load_history(session_id)
     history.append(
