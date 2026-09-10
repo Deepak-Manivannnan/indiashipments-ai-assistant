@@ -256,15 +256,18 @@ def render() -> None:
         _banners(state)
         _transcript()
         _document_upload(state)
-
         chosen = _options()
-        typed = st.chat_input("Type your message, or pick an option above")
-
-        message = chosen or typed
-        if message:
-            st.session_state["options"] = []
-            _send(message)
-            st.rerun()
 
     with right:
         _panel(state)
+
+    # Outside the columns on purpose: at the top level Streamlit pins the
+    # composer to the bottom of the window, so it stays visible however long
+    # the conversation runs.
+    typed = st.chat_input("Type your message, or pick an option above")
+
+    message = chosen or typed
+    if message:
+        st.session_state["options"] = []
+        _send(message)
+        st.rerun()

@@ -20,14 +20,15 @@ def _card_row(cards: list[tuple[str, str]]) -> None:
     """A row of cards that all end up the same height.
 
     Streamlit columns size to their own content, so three cards with different
-    amounts of text come out ragged. The wrapper lets the CSS stretch them.
+    amounts of text come out ragged. The stretching is done in CSS, against any
+    column that contains a card -- a wrapper div emitted through st.markdown
+    would be a sibling of the columns rather than their parent, and would do
+    nothing at all.
     """
-    st.markdown('<div class="is-cards">', unsafe_allow_html=True)
     columns = st.columns(len(cards), gap="medium")
     for column, (title, body) in zip(columns, cards):
         with column:
             st.markdown(_card(title, body), unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------

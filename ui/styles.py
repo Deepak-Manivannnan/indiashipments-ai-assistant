@@ -68,13 +68,23 @@ CSS = f"""
   }}
   .is-bubble.error {{ background: #FBE9E7; color: {DANGER}; }}
 
-  /* --- equal-height card rows --- */
-  .is-cards [data-testid="stColumn"] {{ display: flex; }}
-  .is-cards [data-testid="stColumn"] > div {{
+  /* --- equal-height card rows ---
+     Any column that holds a card is stretched, so a row of cards with
+     different amounts of text still lines up. */
+  [data-testid="stColumn"]:has(.is-card) {{ display: flex; }}
+  [data-testid="stColumn"]:has(.is-card) > div {{
       width: 100%; display: flex; flex-direction: column;
   }}
-  .is-cards [data-testid="stColumn"] .is-card {{ flex: 1 1 auto; }}
-  .is-cards [data-testid="stVerticalBlock"] {{ height: 100%; }}
+  [data-testid="stColumn"]:has(.is-card) [data-testid="stVerticalBlock"] {{
+      height: 100%;
+  }}
+  [data-testid="stColumn"]:has(.is-card) [data-testid="stMarkdown"] {{
+      flex: 1 1 auto; display: flex;
+  }}
+  [data-testid="stColumn"]:has(.is-card) [data-testid="stMarkdownContainer"] {{
+      width: 100%; display: flex;
+  }}
+  .is-card {{ display: flex; flex-direction: column; width: 100%; }}
 
   /* --- hero --- */
   .is-hero {{
@@ -170,19 +180,20 @@ def chip(status: str) -> str:
 
 CHAT_LAYOUT_CSS = """
 <style>
-  /* On the assistant page the frame is fixed and only the transcript moves.
-     Streamlit's own scroll container is pinned so the composer stays put. */
-  section[data-testid="stMain"] {{ overflow: hidden !important; }}
-  section[data-testid="stMain"] .block-container {{
-      padding-bottom: 0.5rem !important;
-  }}
+  /* The assistant page is sized to the viewport so the transcript is the only
+     thing that scrolls. The main container is deliberately NOT set to
+     overflow:hidden -- doing so put the composer out of reach entirely. */
   .st-key-isa-transcript {{
+      height: calc(100vh - 430px) !important;
+      min-height: 240px;
       border: 1px solid {border}; border-radius: 12px;
-      padding: .8rem 1rem; background: #fff;
+      padding: .7rem .9rem; background: #fff;
   }}
-  /* Keep the composer inline with the column rather than pinned across the
-     whole viewport, so it sits directly under the transcript. */
-  div[data-testid="stChatInput"] {{ margin-top: .4rem; }}
+  /* The composer is pinned to the bottom of the window, so it is always
+     visible however long the conversation gets. */
+  div[data-testid="stBottomBlockContainer"] {{
+      padding-bottom: .6rem; padding-top: .4rem;
+  }}
 </style>
 """.format(border=BORDER)
 
