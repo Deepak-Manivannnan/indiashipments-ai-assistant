@@ -80,11 +80,14 @@ def _greeting() -> None:
             "Create a new shipment",
         ]
     else:
+        # Nothing to offer a first-time customer but a conversation: a lone
+        # "Create a new shipment" button is just the greeting repeated as a
+        # widget.
         greeting = (
             f"Hi {first_name}, how can I help today? Tell me what you'd like to "
             "send and I'll take it from there."
         )
-        options = ["Create a new shipment"]
+        options = []
 
     st.session_state["messages"].append({"role": "assistant", "content": greeting})
     st.session_state["options"] = options
@@ -251,14 +254,23 @@ def render() -> None:
     styles.inject_chat_layout(
         banners=len(blockers) + (1 if state.get("stub_mode") else 0),
         uploader=bool(_outstanding_document(state)),
+        options=bool(st.session_state.get("options")),
     )
 
     left, right = st.columns([1.6, 1], gap="large")
 
     with left:
-        # A single icon, right-aligned above the conversation. The heading is
-        # gone: the page is already reached from a button labelled Ask ISA.
-        _, reset = st.columns([9, 1], vertical_alignment="center")
+        _banners(state)
+        _transcript()
+        _document_upload(state)
+        chosen = _options()
+
+        # The composer, with the new-chat icon beside it. Inside the column so
+        # it is the width of the conversation, and beside the input so it stays
+        # in view instead of scrolling away with the messages.
+        composer, reset = st.columns([12, 1], vertical_alignment="center")
+        with composer:
+            typed = st.chat_input("Type your message, or pick an option above")
         with reset:
             if st.button(
                 "✏️",
@@ -269,14 +281,6 @@ def render() -> None:
             ):
                 _reset()
                 st.rerun()
-
-        _banners(state)
-        _transcript()
-        _document_upload(state)
-        chosen = _options()
-        # Inside the column, so the composer is the width of the conversation
-        # rather than the width of the window.
-        typed = st.chat_input("Type your message, or pick an option above")
 
     with right:
         _panel(state)

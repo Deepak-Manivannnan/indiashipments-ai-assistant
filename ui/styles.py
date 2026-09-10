@@ -191,7 +191,6 @@ CHAT_LAYOUT_CSS = """
   .st-key-isa-transcript {{
       height: calc(100vh - {offset}px) !important;
       min-height: 220px;
-      max-height: 620px;
       border: 1px solid {border}; border-radius: 12px;
       padding: .7rem .9rem; background: #fff;
   }}
@@ -200,10 +199,11 @@ CHAT_LAYOUT_CSS = """
      stretch across the window. */
   div[data-testid="stChatInput"] {{ margin-top: .5rem; }}
 
-  /* The new-chat icon: quiet until pointed at. */
+  /* The new-chat icon, sitting beside the composer so it is always in view
+     rather than scrolling away with the messages. */
   .st-key-isa-new-chat button {{
-      font-size: 1.05rem; padding: .1rem .2rem; min-height: 2rem;
-      opacity: .55; transition: opacity .15s ease;
+      font-size: 1.1rem; opacity: .5; transition: opacity .15s ease;
+      min-height: 2.6rem; margin-top: .5rem;
   }}
   .st-key-isa-new-chat button:hover {{ opacity: 1; }}
   div[data-testid="stChatInput"] textarea {{ font-size: .93rem; }}
@@ -218,16 +218,20 @@ def _chat_layout_css(offset: int) -> str:
 # Space taken by everything else on the page. Banners and the upload control
 # appear conditionally, so the transcript gives up height to make room rather
 # than pushing the composer off the bottom of the window.
-BASE_CHAT_OFFSET = 330
+BASE_CHAT_OFFSET = 420
 BANNER_HEIGHT = 62
 UPLOADER_HEIGHT = 110
+OPTIONS_HEIGHT = 58
 
 
-def inject_chat_layout(banners: int = 0, uploader: bool = False) -> None:
+def inject_chat_layout(
+    banners: int = 0, uploader: bool = False, options: bool = False
+) -> None:
     """Extra styling used only by the assistant page."""
     offset = (
         BASE_CHAT_OFFSET
         + banners * BANNER_HEIGHT
         + (UPLOADER_HEIGHT if uploader else 0)
+        + (OPTIONS_HEIGHT if options else 0)
     )
     st.markdown(_chat_layout_css(offset), unsafe_allow_html=True)

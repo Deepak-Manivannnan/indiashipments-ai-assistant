@@ -32,6 +32,13 @@ TRACKING_REFERENCE = re.compile(r"\b(IS-\d+)\b", re.IGNORECASE)
 NUMBER = re.compile(r"\d+(?:\.\d+)?")
 PIN_IN_TEXT = re.compile(r"\b(\d{6})\b")
 
+# Asking about an order without quoting a reference.
+TRACKING_INTENT = re.compile(
+    r"\b(track|tracking|status|where is|my order|my orders|my shipment|"
+    r"my shipments|delivered|arrive[d]?)\b",
+    re.IGNORECASE,
+)
+
 # Any of these, once the draft is bookable, means "go ahead".
 CONFIRMING = re.compile(
     r"\b(yes|yeah|confirm|book|go ahead|proceed|ok|okay)\b", re.IGNORECASE
@@ -288,6 +295,45 @@ def stub_turn(session_id: str, message: str) -> dict:
                 "instead?",
                 [], None, calls, None,
             )
+
+    # 2a. Asking about an order without naming one. Look at what they actually
+    #     have rather than asking for a reference they may not possess.
+    if not TRACKING_REFERENCE.search(text) and TRACKING_INTENT.search(lowered):
+        mine = _record(calls, "list_my_shipments", {},
+                       tools.list_my_shipments(session_id))
+        shipments = mine.get("shipments") or []
+
+        if not shipments:
+            _last_asked.pop(session_id, None)
+            return _respond(
+                session_id,
+                "I've checked, and there aren't any orders on your account yet "
+                "-- this would be your first. I'd be glad to get one booked for "
+                "you: just tell me what you'd like to send.",
+                [], None, calls, None,
+            )
+
+        if len(shipments) == 1:
+            only = shipments[0]
+            tracked = _record(
+                calls, "get_tracking", {"reference": only["reference"]},
+                tools.get_tracking(only["reference"]),
+            )
+            _last_asked.pop(session_id, None)
+            return _respond(
+                session_id,
+                tracked.get("explanation", "")
+                + "\n\nIs there anything else I can help with?",
+                ["Send a parcel"], None, calls, None,
+            )
+
+        return _respond(
+            session_id,
+            "You have a few shipments with us. Which one would you like to "
+            "check?",
+            [f"{s['reference']} ({s['status']})" for s in shipments[:3]],
+            "shipment", calls, None,
+        )
 
     # 2. Tracking, whenever a reference is mentioned.
     reference = TRACKING_REFERENCE.search(text)
