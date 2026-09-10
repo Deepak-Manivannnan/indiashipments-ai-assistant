@@ -256,11 +256,17 @@ def render() -> None:
     left, right = st.columns([1.6, 1], gap="large")
 
     with left:
-        title, reset = st.columns([3, 1], vertical_alignment="center")
-        with title:
-            st.markdown('<div class="is-chattitle">ISA</div>', unsafe_allow_html=True)
+        # A single icon, right-aligned above the conversation. The heading is
+        # gone: the page is already reached from a button labelled Ask ISA.
+        _, reset = st.columns([9, 1], vertical_alignment="center")
         with reset:
-            if st.button("New chat", use_container_width=True, type="tertiary"):
+            if st.button(
+                "✏️",
+                help="New chat",
+                type="tertiary",
+                use_container_width=True,
+                key="isa-new-chat",
+            ):
                 _reset()
                 st.rerun()
 

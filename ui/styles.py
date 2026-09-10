@@ -50,9 +50,6 @@ CSS = f"""
   }}
 
   /* --- chat bubbles --- */
-  .is-chattitle {{
-      font-size: 1.35rem; font-weight: 700; color: {INK}; line-height: 2.2rem;
-  }}
   .is-msg {{ display: flex; margin: .3rem 0; }}
   .is-msg.bot {{ justify-content: flex-start; }}
   .is-msg.user {{ justify-content: flex-end; }}
@@ -202,6 +199,13 @@ CHAT_LAYOUT_CSS = """
   /* Sit the composer directly under the transcript rather than letting it
      stretch across the window. */
   div[data-testid="stChatInput"] {{ margin-top: .5rem; }}
+
+  /* The new-chat icon: quiet until pointed at. */
+  .st-key-isa-new-chat button {{
+      font-size: 1.05rem; padding: .1rem .2rem; min-height: 2rem;
+      opacity: .55; transition: opacity .15s ease;
+  }}
+  .st-key-isa-new-chat button:hover {{ opacity: 1; }}
   div[data-testid="stChatInput"] textarea {{ font-size: .93rem; }}
 </style>
 """
@@ -214,7 +218,7 @@ def _chat_layout_css(offset: int) -> str:
 # Space taken by everything else on the page. Banners and the upload control
 # appear conditionally, so the transcript gives up height to make room rather
 # than pushing the composer off the bottom of the window.
-BASE_CHAT_OFFSET = 380
+BASE_CHAT_OFFSET = 330
 BANNER_HEIGHT = 62
 UPLOADER_HEIGHT = 110
 
