@@ -16,8 +16,11 @@ import streamlit as st
 # reads configuration.
 try:  # pragma: no cover - only meaningful on Streamlit Cloud
     for _key, _value in st.secrets.items():
-        if isinstance(_value, str):
-            os.environ.setdefault(_key, _value)
+        # Coerced to text, so a port written without quotes still arrives.
+        # Whitespace trimmed, because a stray space in a pasted password is
+        # indistinguishable from a wrong password in the error it produces.
+        if not isinstance(_value, (dict, list)):
+            os.environ.setdefault(_key, str(_value).strip())
 except Exception:
     pass  # no secrets file locally, which is fine
 
