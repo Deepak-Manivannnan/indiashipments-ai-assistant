@@ -222,6 +222,8 @@ def _build_state(session_id: str, reference: str | None) -> dict:
     return {
         "has_draft": True,
         "draft": summary.get("draft"),
+        # Which fixed-choice list, if any, belongs with the next question.
+        "ask_next_options": summary.get("ask_next_options"),
         "validated": summary.get("validated"),
         "blockers": blockers,
         "still_missing": summary.get("still_missing", []),
@@ -230,11 +232,23 @@ def _build_state(session_id: str, reference: str | None) -> dict:
     }
 
 
-def _options_from(calls: list[ToolCallRecord]) -> tuple[list[str], str | None]:
-    """Selectable choices come from the app's own lists, via `list_options`."""
+def _options_for(calls: list[ToolCallRecord], state: dict) -> tuple[list[str], str | None]:
+    """The choices to show as buttons.
+
+    Taken from the model's own `list_options` call when it made one, and
+    otherwise from the field the draft says is next. Deciding this here rather
+    than relying on the model to ask means the buttons appear whether or not
+    it remembered -- and it frequently does not.
+    """
     for call in reversed(calls):
         if call.name == "list_options" and call.ok:
             return call.result.get("options", []), call.result.get("field")
+
+    field = state.get("ask_next_options")
+    if field:
+        listed = tools.list_options(field)
+        if listed.get("ok"):
+            return listed.get("options", []), field
     return [], None
 
 
@@ -374,14 +388,15 @@ def run_turn(session_id: str, message: str) -> dict:
         finally:
             db.close()
 
-    options, expects = _options_from(executed)
+    state = _build_state(session_id, booked_reference)
+    options, expects = _options_for(executed, state)
 
     return {
         "reply": reply,
         "options": options,
         "expects": expects,
         "allow_free_text": True,
-        "state": _build_state(session_id, booked_reference),
+        "state": state,
         "tool_calls": [
             {"name": c.name, "args": c.args, "ok": c.ok, "result": c.result}
             for c in executed

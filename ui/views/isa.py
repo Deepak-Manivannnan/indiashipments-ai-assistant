@@ -11,6 +11,7 @@ import re
 import uuid
 
 import streamlit as st
+from streamlit.components import v1 as st_components
 
 from ui import api, components, styles
 
@@ -127,12 +128,36 @@ def _transcript() -> str | None:
         )
 
     with st.container(height=CHAT_HEIGHT, border=False, key="isa-transcript"):
-        # The frame is laid out bottom-up in CSS so it always shows the newest
-        # message without any scripting. That reverses the visual order, so
-        # the options are emitted first to end up below the conversation.
-        chosen = _options()
         st.markdown("".join(bubbles), unsafe_allow_html=True)
+        chosen = _options()
     return chosen
+
+
+def _scroll_to_latest() -> None:
+    """Keep the newest message in view.
+
+    A fixed-height container does not follow its own content, so without this
+    each reply lands below the fold. Done with a script rather than in CSS: a
+    column-reverse frame also reverses the option buttons inside it.
+    """
+    if not st.session_state.get("messages"):
+        return
+    st_components.html(
+        """
+        <script>
+          const pin = () => {
+            const box = window.parent.document.querySelector(
+              '.st-key-isa-transcript'
+            );
+            if (box) { box.scrollTop = box.scrollHeight; }
+          };
+          pin();
+          setTimeout(pin, 80);
+          setTimeout(pin, 250);
+        </script>
+        """,
+        height=0,
+    )
 
 
 def _outstanding_document(state: dict) -> str | None:
@@ -272,6 +297,8 @@ def render() -> None:
 
     with right:
         _panel(state)
+
+    _scroll_to_latest()
 
     message = chosen or typed
     if message:
