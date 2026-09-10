@@ -216,9 +216,16 @@ def test_a_delivered_shipment_reads_as_finished():
 
 def test_distance_and_price_appear_once_the_draft_allows_them(signed_in_session):
     """The application works these out; it does not wait to be asked."""
-    tools.save_draft(signed_in_session, sender_pin="682031",
-                     recipient_pin="560001", contents="Books")
+    tools.save_draft(signed_in_session, contents="Books")
     assert "distance_km" not in loop._build_state(signed_in_session, None)
+
+    # Both PIN codes are enough for the distance -- someone wants to know how
+    # far their parcel is going long before they have chosen a service.
+    tools.save_draft(signed_in_session, sender_pin="682031",
+                     recipient_pin="560001")
+    part_way = loop._build_state(signed_in_session, None)
+    assert 300 < part_way["distance_km"] < 420
+    assert part_way["estimated_price_inr"] is None
 
     tools.save_draft(signed_in_session, weight_g=2000, service_type="Standard")
     state = loop._build_state(signed_in_session, None)

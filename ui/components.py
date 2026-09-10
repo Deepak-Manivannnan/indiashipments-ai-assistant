@@ -120,7 +120,11 @@ def draft_panel(state: dict) -> None:
             _row("Distance", f"{distance:,.0f} km" if distance else "unknown")
         )
         rows.append(
-            _row("Estimated price", f"Rs {price:,.0f}" if price else "unavailable")
+            _row(
+                "Estimated price",
+                f"Rs {price:,.0f}" if price
+                else ("unavailable" if distance is None else None),
+            )
         )
 
     note = (

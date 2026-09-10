@@ -37,13 +37,6 @@ def _ensure_session() -> None:
     st.session_state.setdefault("state", {})
     st.session_state.setdefault("options", [])
     st.session_state.setdefault("greeted", False)
-    st.session_state.setdefault("pending", None)
-
-
-def _queue(message: str) -> None:
-    """Record what the user said and let the page redraw before we wait."""
-    st.session_state["messages"].append({"role": "user", "content": message})
-    st.session_state["pending"] = message
 
 
 def _send(message: str) -> None:
@@ -103,8 +96,7 @@ def _greeting() -> None:
 
 def _reset() -> None:
     api.reset_conversation(st.session_state["session_id"])
-    for key in ("session_id", "messages", "state", "options", "greeted",
-                "pending"):
+    for key in ("session_id", "messages", "state", "options", "greeted"):
         st.session_state.pop(key, None)
 
 
@@ -115,7 +107,30 @@ def _as_bubble_html(text: str) -> str:
     return safe.replace("\n", "<br>")
 
 
-def _transcript() -> str | None:
+def _paint(slot, bubbles: list[str]) -> None:
+    slot.markdown("".join(bubbles), unsafe_allow_html=True)
+
+
+def _bubbles() -> list[str]:
+    rendered = []
+    for message in st.session_state["messages"]:
+        side = "user" if message["role"] == "user" else "bot"
+        css = "is-bubble error" if message.get("error") else "is-bubble"
+        rendered.append(
+            f'<div class="is-msg {side}">'
+            f'<div class="{css}">{_as_bubble_html(message["content"])}</div>'
+            "</div>"
+        )
+    return rendered
+
+
+TYPING_BUBBLE = (
+    '<div class="is-msg bot"><div class="is-bubble is-typing">'
+    "ISA is typing<span>.</span><span>.</span><span>.</span></div></div>"
+)
+
+
+def _transcript() -> tuple[str | None, object, object]:
     """The conversation, in its own scrolling frame.
 
     Rendered as bubbles rather than Streamlit's chat rows so the user's
@@ -125,35 +140,15 @@ def _transcript() -> str | None:
     answer. Outside it they added height to the page and pushed the composer
     off the bottom of the window.
     """
-    bubbles = []
-    for message in st.session_state["messages"]:
-        side = "user" if message["role"] == "user" else "bot"
-        css = "is-bubble error" if message.get("error") else "is-bubble"
-        bubbles.append(
-            f'<div class="is-msg {side}">'
-            f'<div class="{css}">{_as_bubble_html(message["content"])}</div>'
-            "</div>"
-        )
-
-    if st.session_state.get("pending"):
-        bubbles.append(
-            '<div class="is-msg bot"><div class="is-bubble is-typing">'
-            "ISA is typing<span>.</span><span>.</span><span>.</span>"
-            "</div></div>"
-        )
+    bubbles = _bubbles()
 
     with st.container(height=CHAT_HEIGHT, border=False, key="isa-transcript"):
-        st.markdown("".join(bubbles), unsafe_allow_html=True)
-        if st.session_state.get("pending"):
-            return None
-        # In a slot of its own, so a chosen option leaves the screen at once
-        # instead of sitting there greyed out until the reply arrives.
-        slot = st.empty()
-        with slot.container():
+        body = st.empty()
+        _paint(body, bubbles)
+        choices = st.empty()
+        with choices.container():
             chosen = _options()
-        if chosen:
-            slot.empty()
-    return chosen
+    return chosen, body, choices
 
 
 def _scroll_to_latest() -> None:
@@ -298,7 +293,7 @@ def render() -> None:
     left, right = st.columns([1.6, 1], gap="large")
 
     with left:
-        chosen = _transcript()
+        chosen, body, choices = _transcript()
         _document_upload(state)
 
         # The composer, with the new-chat icon beside it. Inside the column so
@@ -325,14 +320,12 @@ def render() -> None:
 
     message = chosen or typed
     if message:
+        # Take the buttons off the screen, show the message with a typing
+        # indicator, and only then wait for the reply.
+        choices.empty()
         st.session_state["options"] = []
-        _queue(message)
-        st.rerun()
+        st.session_state["messages"].append({"role": "user", "content": message})
+        _paint(body, _bubbles() + [TYPING_BUBBLE])
 
-    # The user's message is on screen by now, so this is the only wait they
-    # see, and they can see what they are waiting for.
-    pending = st.session_state.get("pending")
-    if pending:
-        _send(pending)
-        st.session_state.pop("pending", None)
+        _send(message)
         st.rerun()

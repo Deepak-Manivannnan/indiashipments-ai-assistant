@@ -153,6 +153,43 @@ def _require_document(db, shipment_id: int, doc_type: str) -> None:
         db.flush()
 
 
+def _gate_on_sender_choice(db, session_id: str, shipment: Shipment,
+                           payload: dict) -> dict:
+    """Ask whose address the parcel is going from, before assuming.
+
+    A customer with an address saved may still be sending on someone else's
+    behalf, or from somewhere else today. Enforced here rather than left to
+    the prompt, because filling it in silently decides something for them.
+    Customers with no saved address are never asked -- there is nothing to
+    offer, so their details are collected as normal.
+    """
+    if payload.get("awaiting_document") or payload.get("awaiting_acknowledgement"):
+        return payload
+
+    sender = shipment.sender_json or {}
+    if any(sender.get(field) for field in ("name", "phone", "address", "pin")):
+        return payload  # they have already answered, one way or the other
+
+    state = _get_state(db, session_id)
+    if state.customer_id is None:
+        return payload
+    customer = db.get(Customer, state.customer_id)
+    if customer is None or not (customer.address and customer.pin):
+        return payload  # nothing saved to offer
+
+    payload["awaiting_sender_choice"] = True
+    payload["ask_next"] = "whose address the parcel is going from"
+    payload["ask_next_options"] = "sender_address"
+    payload["ask_next_instruction"] = (
+        f"This customer has an address saved: {customer.address}, "
+        f"{customer.city} {customer.pin}. Ask whether we are collecting from "
+        "there or from a different address, and ask NOTHING else until they "
+        "answer. Call prefill_sender_from_profile only if they choose their "
+        "saved address; otherwise collect the sender's details normally."
+    )
+    return payload
+
+
 def _gate_on_acknowledgement(shipment: Shipment, payload: dict) -> dict:
     """Make the high-value warning the only thing being asked for.
 
@@ -301,8 +338,11 @@ def save_draft(
             "ask_next_instruction": as_dict["ask_next_instruction"],
             "note": "Draft saved. It must be validated again before booking.",
         }
-        payload = _gate_on_acknowledgement(
-            shipment, _gate_on_document(db, shipment, payload)
+        payload = _gate_on_sender_choice(
+            db, session_id, shipment,
+            _gate_on_acknowledgement(
+                shipment, _gate_on_document(db, shipment, payload)
+            ),
         )
 
         # Screening the contents here as well as in validate_shipment means the
@@ -553,8 +593,11 @@ def get_summary(session_id: str) -> dict:
                 and (shipment.insurance_ack or not result.requires_insurance_ack)
             ),
         }
-        return _gate_on_acknowledgement(
-            shipment, _gate_on_document(db, shipment, summary)
+        return _gate_on_sender_choice(
+            db, session_id, shipment,
+            _gate_on_acknowledgement(
+                shipment, _gate_on_document(db, shipment, summary)
+            ),
         )
 
 
@@ -646,8 +689,11 @@ def validate_shipment(session_id: str) -> dict:
                 },
             }
         )
-        return _gate_on_acknowledgement(
-            shipment, _gate_on_document(db, shipment, payload)
+        return _gate_on_sender_choice(
+            db, session_id, shipment,
+            _gate_on_acknowledgement(
+                shipment, _gate_on_document(db, shipment, payload)
+            ),
         )
 
 
@@ -1013,6 +1059,7 @@ def list_options(field: str) -> dict:
         "service_type": SERVICE_TYPES,
         "contents_category": CONTENTS_CATEGORIES,
         "insurance": ["Yes, I acknowledge", "No, reduce the declared value"],
+        "sender_address": ["Use my saved address", "A different address"],
     }
     if field not in catalogue:
         return _fail(

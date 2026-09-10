@@ -210,24 +210,28 @@ def _quote(draft: dict) -> dict:
     """
     sender = (draft.get("sender") or {}).get("pin")
     recipient = (draft.get("recipient") or {}).get("pin")
-    weight = (draft.get("package") or {}).get("weight_g")
-    service = draft.get("service_type")
-    if not (sender and recipient and weight and service):
+    if not (sender and recipient):
         return {}
 
+    # Distance as soon as both PIN codes are known. Waiting for the weight and
+    # the service meant it only appeared near the end of the conversation,
+    # which is not when someone wants to know how far their parcel is going.
     distance = tools.calculate_distance(sender, recipient)
     if distance.get("status") != "ok":
         return {"distance_km": None, "estimated_price_inr": None}
 
-    price = tools.estimate_price(
-        weight_g=weight, service_type=service, distance_km=distance["distance_km"]
-    )
-    return {
-        "distance_km": distance["distance_km"],
-        "estimated_price_inr": (
-            price.get("estimated_price_inr") if price.get("status") == "ok" else None
-        ),
-    }
+    quote = {"distance_km": distance["distance_km"], "estimated_price_inr": None}
+
+    weight = (draft.get("package") or {}).get("weight_g")
+    service = draft.get("service_type")
+    if weight and service:
+        price = tools.estimate_price(
+            weight_g=weight, service_type=service,
+            distance_km=distance["distance_km"],
+        )
+        if price.get("status") == "ok":
+            quote["estimated_price_inr"] = price["estimated_price_inr"]
+    return quote
 
 
 def _build_state(session_id: str, reference: str | None) -> dict:
@@ -272,15 +276,18 @@ def _options_for(calls: list[ToolCallRecord], state: dict) -> tuple[list[str], s
     than relying on the model to ask means the buttons appear whether or not
     it remembered -- and it frequently does not.
     """
-    for call in reversed(calls):
-        if call.name == "list_options" and call.ok:
-            return call.result.get("options", []), call.result.get("field")
-
+    # The draft's own next question wins. The model sometimes fetches the list
+    # for a field it is thinking ahead to rather than the one it just asked
+    # about, which put Standard/Express under a question about the address.
     field = state.get("ask_next_options")
     if field:
         listed = tools.list_options(field)
         if listed.get("ok"):
             return listed.get("options", []), field
+
+    for call in reversed(calls):
+        if call.name == "list_options" and call.ok:
+            return call.result.get("options", []), call.result.get("field")
     return [], None
 
 
