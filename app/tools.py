@@ -165,21 +165,27 @@ def save_draft(
         recipient = dict(shipment.recipient_json or {})
         package = dict(shipment.package_json or {})
 
-        for key, value in [
+        def apply(block: dict, updates: list[tuple[str, object]]) -> dict:
+            for key, value in updates:
+                if value is None:
+                    continue
+                # A city or PIN edit invalidates any earlier acceptance of a
+                # mismatch: the user agreed to the old pairing, not this one.
+                if key in ("city", "pin") and block.get(key) != value:
+                    block.pop("city_pin_accepted", None)
+                block[key] = value
+            return block
+
+        sender = apply(sender, [
             ("name", sender_name), ("phone", sender_phone),
             ("address", sender_address), ("city", sender_city),
             ("state", sender_state), ("pin", sender_pin),
-        ]:
-            if value is not None:
-                sender[key] = value
-
-        for key, value in [
+        ])
+        recipient = apply(recipient, [
             ("name", recipient_name), ("phone", recipient_phone),
             ("address", recipient_address), ("city", recipient_city),
             ("state", recipient_state), ("pin", recipient_pin),
-        ]:
-            if value is not None:
-                recipient[key] = value
+        ])
 
         for key, value in [
             ("weight_g", weight_g), ("length_mm", length_mm),
@@ -320,6 +326,78 @@ def list_my_shipments(session_id: str) -> dict:
                 }
                 for s in shipments
             ],
+        }
+
+
+def resolve_address_conflict(session_id: str, role: str, keep: str) -> dict:
+    """Settle a disagreement between a stated city and its PIN code.
+
+    `keep="pin"` rewrites the city and state to the values India Post holds.
+    `keep="city"` records that the user stands by the address as written.
+
+    Either way the conflict is settled and stops blocking the booking. Without
+    this there is no way out of the disagreement, and the conversation loops on
+    the same question no matter what the user answers.
+    """
+    role = (role or "").strip().lower()
+    keep = (keep or "").strip().lower()
+    if role not in ("sender", "recipient"):
+        return _fail("Role must be 'sender' or 'recipient'.")
+    if keep not in ("pin", "city"):
+        return _fail(
+            "Say whether to keep the address as written ('city') or to use the "
+            "location the PIN code belongs to ('pin')."
+        )
+
+    with session_scope() as db:
+        shipment = _get_draft(db, session_id)
+        if shipment is None:
+            return _fail("There is no shipment draft for this conversation yet.")
+
+        person = dict(
+            (shipment.sender_json if role == "sender" else shipment.recipient_json)
+            or {}
+        )
+        pin = person.get("pin")
+        if not pin:
+            return _fail(f"No PIN code has been given for the {role} yet.")
+
+        if keep == "pin":
+            looked_up = pin_api.lookup_pin(pin)
+            if looked_up.get("status") != pin_api.STATUS_OK:
+                return _fail(
+                    f"PIN {pin} could not be looked up just now, so its city "
+                    "cannot be applied. Ask the user to confirm the address "
+                    "instead."
+                )
+            person["city"] = looked_up.get("city")
+            person["state"] = looked_up.get("state")
+            person.pop("city_pin_accepted", None)
+            outcome = (
+                f"The {role} address now reads {person['city']}, "
+                f"{person['state']}, matching PIN {pin}."
+            )
+        else:
+            person["city_pin_accepted"] = True
+            outcome = (
+                f"Recorded that the {role} address is correct as written "
+                f"({person.get('city')}), even though PIN {pin} is registered "
+                "elsewhere."
+            )
+
+        if role == "sender":
+            shipment.sender_json = person
+        else:
+            shipment.recipient_json = person
+        shipment.validated = False  # the draft changed; it must be re-checked
+
+        return {
+            "ok": True,
+            "role": role,
+            "kept": keep,
+            "city": person.get("city"),
+            "state": person.get("state"),
+            "note": outcome + " Re-run validation and carry on with the booking.",
         }
 
 

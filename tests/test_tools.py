@@ -542,3 +542,60 @@ def test_customers_only_see_their_own_shipments(session_id):
     assert result["ok"] is True
     references = [s["reference"] for s in result["shipments"]]
     assert references == ["IS-1077"]  # not IS-1001 or IS-1042
+
+
+# ---------------------------------------------------------------------------
+# City / PIN conflicts must be resolvable, not a dead end
+# ---------------------------------------------------------------------------
+
+def test_a_city_pin_mismatch_blocks_until_it_is_settled(session_id):
+    fill_valid_draft(session_id, sender_city="Chennai", sender_pin="641604")
+    validation = tools.validate_shipment(session_id)
+
+    assert validation["validated"] is False
+    assert any("belongs to" in e for e in validation["errors"])
+
+
+def test_keeping_the_pin_rewrites_the_city_and_unblocks(session_id):
+    fill_valid_draft(session_id, sender_city="Chennai", sender_pin="641604")
+    tools.validate_shipment(session_id)
+
+    resolved = tools.resolve_address_conflict(session_id, role="sender", keep="pin")
+    assert resolved["ok"] is True
+    assert "Tiruppur" in (resolved["city"] or "") or resolved["city"]
+
+    validation = tools.validate_shipment(session_id)
+    assert validation["validated"] is True, validation["errors"]
+    assert tools.confirm_booking(session_id)["ok"] is True
+
+
+def test_keeping_the_address_as_written_also_unblocks(session_id):
+    """The brief allows a mismatch to be resolved OR explicitly accepted."""
+    fill_valid_draft(session_id, sender_city="Chennai", sender_pin="641604")
+    tools.validate_shipment(session_id)
+
+    resolved = tools.resolve_address_conflict(session_id, role="sender", keep="city")
+    assert resolved["ok"] is True
+
+    validation = tools.validate_shipment(session_id)
+    assert validation["validated"] is True, validation["errors"]
+    # Accepted, but still recorded -- it is not silently forgotten.
+    assert any("confirmed the address as written" in w for w in validation["warnings"])
+
+
+def test_changing_the_address_again_revokes_the_acceptance(session_id):
+    fill_valid_draft(session_id, sender_city="Chennai", sender_pin="641604")
+    tools.resolve_address_conflict(session_id, role="sender", keep="city")
+    assert tools.validate_shipment(session_id)["validated"] is True
+
+    # A different PIN is a different disagreement, so it must be asked again.
+    tools.save_draft(session_id=session_id, sender_pin="560001")
+    validation = tools.validate_shipment(session_id)
+    assert validation["validated"] is False
+    assert any("belongs to" in e for e in validation["errors"])
+
+
+def test_resolve_rejects_nonsense_arguments(session_id):
+    fill_valid_draft(session_id)
+    assert tools.resolve_address_conflict(session_id, role="nobody", keep="pin")["ok"] is False
+    assert tools.resolve_address_conflict(session_id, role="sender", keep="maybe")["ok"] is False

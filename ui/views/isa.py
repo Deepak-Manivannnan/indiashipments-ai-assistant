@@ -29,7 +29,6 @@ def _ensure_session() -> None:
     st.session_state.setdefault("messages", [])
     st.session_state.setdefault("state", {})
     st.session_state.setdefault("options", [])
-    st.session_state.setdefault("tool_calls", [])
     st.session_state.setdefault("greeted", False)
 
 
@@ -49,11 +48,10 @@ def _send(message: str) -> None:
         return
 
     st.session_state["messages"].append(
-        {"role": "assistant", "content": turn["reply"], "calls": turn["tool_calls"]}
+        {"role": "assistant", "content": turn["reply"]}
     )
     st.session_state["state"] = turn.get("state") or {}
     st.session_state["options"] = turn.get("options") or []
-    st.session_state["tool_calls"] = turn.get("tool_calls") or []
 
 
 def _greeting() -> None:
@@ -86,7 +84,7 @@ def _greeting() -> None:
         options = ["Create a new shipment"]
 
     st.session_state["messages"].append(
-        {"role": "assistant", "content": greeting, "calls": []}
+        {"role": "assistant", "content": greeting}
     )
     st.session_state["options"] = options
 
@@ -140,7 +138,7 @@ def _document_upload(state: dict) -> None:
         return
 
     st.session_state["messages"].append(
-        {"role": "assistant", "content": turn["reply"], "calls": turn["tool_calls"]}
+        {"role": "assistant", "content": turn["reply"]}
     )
     st.session_state["state"] = turn.get("state") or {}
     st.session_state["options"] = turn.get("options") or []
@@ -148,31 +146,15 @@ def _document_upload(state: dict) -> None:
 
 
 def _conversation() -> None:
-    for index, message in enumerate(st.session_state["messages"]):
-        avatar = "🧑" if message["role"] == "user" else "📦"
-        with st.chat_message(message["role"], avatar=avatar):
-            if message.get("error"):
-                st.error(message["content"])
-            else:
-                st.markdown(message["content"])
-
-            calls = message.get("calls") or []
-            if calls:
-                with st.expander(f"What ISA did ({len(calls)} steps)"):
-                    for call in calls:
-                        mark = "✅" if call["ok"] else "⛔"
-                        args = {k: v for k, v in call["args"].items() if v not in (None, "")}
-                        st.markdown(
-                            f"{mark} **`{call['name']}`** "
-                            f"<span class='is-muted'>{args or ''}</span>",
-                            unsafe_allow_html=True,
-                        )
-                        if not call["ok"]:
-                            st.markdown(
-                                f"<span class='is-muted'>&nbsp;&nbsp;refused: "
-                                f"{call['result'].get('error', '')}</span>",
-                                unsafe_allow_html=True,
-                            )
+    """The transcript, in its own scrolling area so the page stays put."""
+    with st.container(height=460, border=False):
+        for message in st.session_state["messages"]:
+            avatar = "🧑" if message["role"] == "user" else "📦"
+            with st.chat_message(message["role"], avatar=avatar):
+                if message.get("error"):
+                    st.error(message["content"])
+                else:
+                    st.markdown(message["content"])
 
 
 def _options() -> str | None:
@@ -193,7 +175,6 @@ def _options() -> str | None:
 
 def render() -> None:
     styles.inject()
-    components.header()
     _ensure_session()
 
     if not components.require_sign_in("use ISA"):

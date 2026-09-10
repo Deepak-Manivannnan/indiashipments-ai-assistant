@@ -213,7 +213,7 @@ FIELD_LABELS = {
     "package.dimensions": "package size -- length, width and height together",
     "service_type": "service type (Standard or Express)",
     "contents": "what the parcel contains",
-    "declared_value": "declared value in INR",
+    "declared_value": "value of the contents in rupees (what they are worth, not the postage) -- it sets the compensation limit if the parcel is lost or damaged",
 }
 
 
@@ -443,11 +443,24 @@ def validate_draft(draft: dict) -> ValidationResult:
                 f"confirm delivery to the {role} address."
             )
         elif status == "mismatch":
-            result.errors.append(
-                f"The {role} PIN code {check.get('pin')} belongs to "
-                f"{check.get('api_city')}, {check.get('api_state')}, but the address "
-                f"says {check.get('given_city')}. Please confirm which is correct."
-            )
+            # The brief requires a city/PIN disagreement to be resolved OR
+            # explicitly accepted. Once the user has chosen, it stops being an
+            # error and becomes a recorded note -- otherwise the conversation
+            # cannot move past it, whatever the user answers.
+            if (draft.get(role) or {}).get("city_pin_accepted"):
+                result.warnings.append(
+                    f"The {role} address says {check.get('given_city')} while PIN "
+                    f"{check.get('pin')} is registered to {check.get('api_city')}. "
+                    "The user has confirmed the address as written."
+                )
+            else:
+                result.errors.append(
+                    f"The {role} PIN code {check.get('pin')} belongs to "
+                    f"{check.get('api_city')}, {check.get('api_state')}, but the "
+                    f"address says {check.get('given_city')}. Ask which is correct "
+                    "and then call resolve_address_conflict -- do not simply ask "
+                    "again."
+                )
 
     result.ok = not result.missing and not result.errors
     return result

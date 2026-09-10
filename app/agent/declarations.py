@@ -49,7 +49,7 @@ SAVE_DRAFT_PROPERTIES = {
     "height_mm": (NUM, "Package height in MILLIMETRES."),
     "service_type": (STR, "Either 'Standard' or 'Express'."),
     "contents": (STR, "What the parcel contains, in the user's own words."),
-    "declared_value": (NUM, "Declared value of the contents in Indian rupees."),
+    "declared_value": (NUM, "What the contents are worth in rupees -- used for the insurance rule and to set the compensation limit if the parcel is lost or damaged. It is not the shipping charge."),
 }
 
 
@@ -127,6 +127,24 @@ DECLARATIONS = [
                 "city": (STR, "The city the user said, to check it agrees."),
             },
             required=["pin"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="resolve_address_conflict",
+        description=(
+            "Settle a disagreement between a stated city and its PIN code, "
+            "once the user has said which is right. keep='pin' rewrites the "
+            "city to the one India Post holds; keep='city' records that the "
+            "address is correct as written. Call this as soon as they answer -- "
+            "asking again without calling it leaves the booking stuck."
+        ),
+        parameters=_schema(
+            {
+                "role": (STR, "'sender' or 'recipient'."),
+                "keep": (STR, "'pin' to use the PIN's city, 'city' to keep the "
+                              "address as the user wrote it."),
+            },
+            required=["role", "keep"],
         ),
     ),
     types.FunctionDeclaration(
@@ -219,6 +237,7 @@ SESSION_SCOPED = {
     "confirm_booking",
     "prefill_sender_from_profile",
     "list_my_shipments",
+    "resolve_address_conflict",
 }
 
 # submit_document is intentionally absent: files arrive through the upload
@@ -228,6 +247,7 @@ CALLABLE_TOOLS = {
     "get_summary": tools.get_summary,
     "list_options": tools.list_options,
     "check_contents": tools.check_contents,
+    "resolve_address_conflict": tools.resolve_address_conflict,
     "prefill_sender_from_profile": tools.prefill_sender_from_profile,
     "list_my_shipments": tools.list_my_shipments,
     "check_pin_serviceability": tools.check_pin_serviceability,

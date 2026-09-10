@@ -18,64 +18,76 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Home, Services and About are public. Everything that touches a shipment
-# requires an account, so a booking always has an owner.
-PUBLIC_PAGES = {
+PAGES = {
     "home": ("Home", pages.home),
     "services": ("Services", pages.services),
-    "about": ("About", pages.about),
-}
-PRIVATE_PAGES = {
-    "track": ("Track", pages.track),
     "orders": ("My Orders", pages.orders),
+    "about": ("About", pages.about),
+    "isa": ("Ask ISA", isa.render),
+    "signin": ("Sign in", auth.render),
 }
-ALL_PAGES = {**PUBLIC_PAGES, **PRIVATE_PAGES, "isa": ("Ask ISA", isa.render),
-             "signin": ("Sign in", auth.render)}
+
+# Pages that touch a shipment need an account, so a booking always has an owner.
+PRIVATE = {"orders", "isa"}
 
 
 def _navigation() -> None:
-    """Top navigation. Ask ISA sits on the right, where an assistant belongs."""
+    """The brand sits on the left, the account on the right, links between."""
     current = st.session_state.get("page", "home")
-    signed_in = bool(st.session_state.get("customer"))
+    customer = st.session_state.get("customer")
 
-    links = [
-        ("home", PUBLIC_PAGES["home"]),
-        ("services", PUBLIC_PAGES["services"]),
-        ("track", PRIVATE_PAGES["track"]),
-    ]
-    if signed_in:
-        links.append(("orders", PRIVATE_PAGES["orders"]))
-    links.append(("about", PUBLIC_PAGES["about"]))
+    links = ["home", "services"]
+    if customer:
+        links.append("orders")
+    links.append("about")
 
-    columns = st.columns([1] * len(links) + [0.4, 1.3, 1])
-    for column, (key, (label, _)) in zip(columns, links):
-        with column:
+    brand, *link_slots, isa_slot, account_slot = st.columns(
+        [2.2] + [1] * len(links) + [1.2, 1.5], vertical_alignment="center"
+    )
+
+    with brand:
+        st.markdown(
+            '<div class="is-brand">India<span>Shipments</span></div>',
+            unsafe_allow_html=True,
+        )
+
+    for slot, key in zip(link_slots, links):
+        with slot:
             if st.button(
-                label,
+                PAGES[key][0],
                 key=f"nav-{key}",
                 use_container_width=True,
-                type="secondary" if key != current else "primary",
+                type="primary" if key == current else "tertiary",
             ):
                 st.session_state["page"] = key
                 st.rerun()
 
-    with columns[-2]:
-        if st.button("✨ Ask ISA", use_container_width=True,
-                     type="primary" if current == "isa" else "secondary"):
+    with isa_slot:
+        if st.button(
+            "✨ Ask ISA",
+            use_container_width=True,
+            type="primary" if current == "isa" else "secondary",
+        ):
             st.session_state["page"] = "isa"
             st.rerun()
 
-    with columns[-1]:
-        if signed_in:
-            if st.button("Sign out", use_container_width=True):
-                for key in ("customer", "session_id", "messages", "state",
-                            "options", "greeted"):
-                    st.session_state.pop(key, None)
-                st.session_state["page"] = "home"
-                st.rerun()
-        elif st.button("Sign in", use_container_width=True):
+    with account_slot:
+        if customer:
+            with st.popover(f"👤 {customer['name'].split()[0]}",
+                            use_container_width=True):
+                st.markdown(f"**Signed in as {customer['name']}**")
+                st.caption(customer["email"])
+                if st.button("Sign out", use_container_width=True):
+                    for key in ("customer", "session_id", "messages", "state",
+                                "options", "greeted"):
+                        st.session_state.pop(key, None)
+                    st.session_state["page"] = "home"
+                    st.rerun()
+        elif st.button("Sign in", use_container_width=True, type="secondary"):
             st.session_state["page"] = "signin"
             st.rerun()
+
+    st.markdown('<div class="is-navrule"></div>', unsafe_allow_html=True)
 
 
 def _backend_warning() -> None:
@@ -101,12 +113,10 @@ def main() -> None:
     _navigation()
 
     page = st.session_state["page"]
-    if page in PRIVATE_PAGES and not st.session_state.get("customer"):
-        # Deep link into a private page while signed out: show sign-in instead,
-        # rather than an empty page or an error.
+    if page in PRIVATE and not st.session_state.get("customer"):
         page = "signin"
 
-    ALL_PAGES[page][1]()
+    PAGES[page][1]()
 
 
 if __name__ == "__main__":

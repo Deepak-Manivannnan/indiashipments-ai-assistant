@@ -1,4 +1,4 @@
-"""Home, Services, Track, My Orders and About."""
+"""Home, Services, My Orders and About."""
 
 import streamlit as st
 
@@ -22,59 +22,76 @@ def _card(title: str, body: str) -> str:
 
 def home() -> None:
     styles.inject()
-    components.header()
+    customer = st.session_state.get("customer")
 
-    st.markdown(
-        """
-        <div class="is-hero">
-          <h1>Send a parcel by describing it</h1>
-          <p>IndiaShipments handles domestic deliveries across India. Tell our
-          assistant what you want to send, in your own words, and it will work
-          out the details, check the rules and book it for you.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    if customer:
+        first_name = customer["name"].split()[0]
+        st.markdown(
+            f"""
+            <div class="is-hero">
+              <h1>Hi {first_name}</h1>
+              <p>Your parcels, moving across India. Book a collection, follow a
+              delivery, or pick up where you left off.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            """
+            <div class="is-hero">
+              <h1>Parcel delivery across India</h1>
+              <p>IndiaShipments moves parcels between every serviceable PIN code
+              in the country, with Standard and Express options, verified
+              addresses and tracking from collection to doorstep.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-    if st.button("Ask ISA to book a shipment", type="primary"):
-        st.session_state["page"] = "isa"
-        st.rerun()
-
-    st.write("")
     columns = st.columns(3)
     cards = [
-        ("Describe it, don't fill a form",
-         "Say what you are sending and where. ISA asks only for what it still "
-         "needs, one question at a time."),
-        ("Checked before it is booked",
-         "Addresses are verified against India Post, and every parcel is "
-         "screened against our acceptance rules before a booking is created."),
-        ("Tracking in plain language",
-         "Ask where a parcel is and get a straight answer from its real "
-         "delivery history -- including when something has gone wrong."),
+        ("Nationwide coverage",
+         "We deliver to every PIN code in the India Post directory. Addresses "
+         "are checked before a booking is confirmed, so parcels do not set off "
+         "towards somewhere we cannot reach."),
+        ("Standard and Express",
+         "Choose the everyday service, or Express when it needs to arrive "
+         "sooner. Fragile goods, perishables and other special contents are "
+         "handled under clear, published conditions."),
+        ("Tracking that tells you the truth",
+         "Every parcel carries a tracking reference and a timestamped history. "
+         "If a delivery is delayed or an attempt fails, we say so plainly "
+         "rather than leaving you guessing."),
     ]
     for column, (title, body) in zip(columns, cards):
         with column:
             st.markdown(_card(title, body), unsafe_allow_html=True)
 
     st.write("")
-    st.markdown("### How it works")
+    st.markdown("### Booking a parcel")
     steps = st.columns(4)
     for column, (number, text) in zip(
         steps,
         [
-            ("1", "Tell ISA what you are sending"),
-            ("2", "Answer a few short questions"),
-            ("3", "Review the shipment summary"),
-            ("4", "Confirm and get your tracking reference"),
+            ("1", "Give us the collection and delivery addresses"),
+            ("2", "Tell us what is inside and what it weighs"),
+            ("3", "Review the shipment and the applicable conditions"),
+            ("4", "Confirm, and we send you a tracking reference"),
         ],
     ):
         with column:
             st.markdown(
                 f'<div class="is-card"><h4 style="color:#0F4C81">{number}</h4>'
-                f'<p>{text}</p></div>',
+                f"<p>{text}</p></div>",
                 unsafe_allow_html=True,
             )
+
+    st.write("")
+    st.caption(
+        "Prefer to talk it through? ISA, our booking assistant, can take the "
+        "details in conversation and book the parcel for you."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -83,13 +100,11 @@ def home() -> None:
 
 def services() -> None:
     styles.inject()
-    components.header()
 
     st.markdown("## Services")
     st.markdown(
         '<p class="is-muted">Domestic shipments within India. These are the '
-        "rules the assistant applies, and it applies them the same way every "
-        "time.</p>",
+        "conditions we apply, and we apply them the same way every time.</p>",
         unsafe_allow_html=True,
     )
 
@@ -133,7 +148,7 @@ def services() -> None:
         "**Fragile goods** — must be cushioned inside the box.",
         "**Perishables** — need suitable packaging and a fast enough service.",
         "**Medicines** — a prescription or supporting document is required.",
-        f"**Declared value above Rs {HIGH_VALUE_THRESHOLD_INR:,}** — you will be "
+        f"**Contents valued above Rs {HIGH_VALUE_THRESHOLD_INR:,}** — you will be "
         "asked to acknowledge that our liability is limited without insurance.",
     ]:
         st.markdown(f"- {item}")
@@ -144,33 +159,61 @@ def services() -> None:
         f"x {MIN_DIMENSIONS_MM[2]} mm\n"
         f"- Length, width and height together must not exceed "
         f"{MAX_TOTAL_DIMENSIONS_MM:,} mm\n"
-        "- Weight, dimensions and declared value must all be greater than zero\n"
+        "- Weight sets the price alongside distance, so we ask for it on every "
+        "booking\n"
         "- Delivery PIN codes are checked against the India Post directory"
     )
     st.caption(
-        f"Services offered: {', '.join(SERVICE_TYPES)}. These rules are a "
+        f"Services offered: {', '.join(SERVICE_TYPES)}. These conditions are a "
         "simplified set for this project and are not a statement of India Post "
         "regulations."
     )
 
 
 # ---------------------------------------------------------------------------
-# Track
+# My orders
 # ---------------------------------------------------------------------------
 
-def track() -> None:
+def orders() -> None:
     styles.inject()
-    components.header()
 
-    st.markdown("## Track a shipment")
+    st.markdown("## My orders")
+    if not components.require_sign_in("see your shipments"):
+        return
+
+    customer = st.session_state["customer"]
+    session_id = st.session_state.get("session_id") or f"orders-{customer['id']}"
+    st.session_state.setdefault("session_id", session_id)
+    api.bind_session(session_id, customer["id"])
+
+    shipments = api.my_shipments(session_id)
+    if shipments:
+        st.markdown(
+            f'<p class="is-muted">{len(shipments)} shipment'
+            f'{"s" if len(shipments) > 1 else ""}.</p>',
+            unsafe_allow_html=True,
+        )
+        for shipment in shipments:
+            components.shipment_card(shipment)
+            st.write("")
+    else:
+        st.markdown(
+            '<p class="is-muted">You have no shipments yet.</p>',
+            unsafe_allow_html=True,
+        )
+        if st.button("Book your first parcel", type="primary"):
+            st.session_state["page"] = "isa"
+            st.rerun()
+
+    st.divider()
+    st.markdown("#### Track any reference")
     st.markdown(
-        '<p class="is-muted">Enter a shipment reference to see its delivery '
-        "history. This is an IndiaShipments tracking reference, not a carrier "
-        "air waybill.</p>",
+        '<p class="is-muted">Looking for a parcel someone else sent you? Enter '
+        "its reference here.</p>",
         unsafe_allow_html=True,
     )
-
-    reference = st.text_input("Shipment reference", placeholder="IS-1042")
+    reference = st.text_input("Shipment reference", placeholder="IS-1042",
+                              label_visibility="collapsed")
     if not reference:
         return
 
@@ -185,51 +228,10 @@ def track() -> None:
                     unsafe_allow_html=True)
     with right:
         st.markdown(styles.chip(payload["status"]), unsafe_allow_html=True)
-
     st.markdown(f'<p class="is-muted">{payload["explanation"]}</p>',
                 unsafe_allow_html=True)
     st.write("")
     components.timeline(payload["events"], payload["status"])
-
-
-# ---------------------------------------------------------------------------
-# My orders
-# ---------------------------------------------------------------------------
-
-def orders() -> None:
-    styles.inject()
-    components.header()
-
-    st.markdown("## My orders")
-    if not components.require_sign_in("see your shipments"):
-        return
-
-    customer = st.session_state["customer"]
-    session_id = st.session_state.get("session_id")
-    if not session_id:
-        session_id = f"orders-{customer['id']}"
-        st.session_state["orders_session"] = session_id
-    api.bind_session(session_id, customer["id"])
-
-    shipments = api.my_shipments(session_id)
-    if not shipments:
-        st.markdown(
-            '<p class="is-muted">You have no shipments yet.</p>',
-            unsafe_allow_html=True,
-        )
-        if st.button("Book your first shipment with ISA", type="primary"):
-            st.session_state["page"] = "isa"
-            st.rerun()
-        return
-
-    st.markdown(
-        f'<p class="is-muted">{len(shipments)} shipment'
-        f'{"s" if len(shipments) > 1 else ""}.</p>',
-        unsafe_allow_html=True,
-    )
-    for shipment in shipments:
-        components.shipment_card(shipment)
-        st.write("")
 
 
 # ---------------------------------------------------------------------------
@@ -238,50 +240,64 @@ def orders() -> None:
 
 def about() -> None:
     styles.inject()
-    components.header()
 
     st.markdown("## About IndiaShipments")
     st.markdown(
-        "IndiaShipments is a domestic logistics service. This application was "
-        "built for the IndiaShipments AI Shipment Agent Challenge."
+        "IndiaShipments is a domestic parcel carrier. We collect from the "
+        "sender's door and deliver anywhere in India that the postal network "
+        "reaches, handling everything from documents and clothing to fragile "
+        "goods and perishables."
     )
 
-    st.markdown("### How ISA works")
+    st.write("")
+    columns = st.columns(3)
+    for column, (title, body) in zip(
+        columns,
+        [
+            ("Our network",
+             "Collections and deliveries across every serviceable PIN code in "
+             "India, moving through regional hubs to the destination city."),
+            ("How we work",
+             "Addresses are verified before a parcel is accepted, contents are "
+             "checked against our published conditions, and every parcel is "
+             "tracked from collection to delivery."),
+            ("Being straight with you",
+             "We do not promise delivery dates we cannot support, and when a "
+             "delivery is delayed or fails we tell you what actually happened "
+             "and what to do next."),
+        ],
+    ):
+        with column:
+            st.markdown(_card(title, body), unsafe_allow_html=True)
+
+    st.write("")
+    st.markdown("### What we ask for, and why")
     st.markdown(
-        "ISA is a language model that calls the application's own functions. It "
-        "decides **when** to look something up, validate a parcel or create a "
-        "booking. It does not decide **what is allowed** — that lives in "
-        "ordinary Python, and the tools refuse anything invalid."
-    )
-    st.markdown(
-        "- A booking cannot be created until validation has passed, every "
-        "requested document has been supplied, and the high-value insurance "
-        "warning has been acknowledged where it applies.\n"
-        "- Changing a detail after validation cancels that validation, so a "
-        "shipment can never be checked and then quietly altered before booking.\n"
-        "- Prices, references, statuses and tracking events shown to you always "
-        "come from the application. ISA is not permitted to state one that a "
-        "function did not return."
+        "- **Collection and delivery addresses**, with PIN codes, so we can "
+        "confirm we serve the destination before accepting the parcel.\n"
+        "- **Contents**, so we can apply the right conditions — cushioning for "
+        "fragile goods, a prescription for medicines, and so on.\n"
+        "- **Weight and size**, which together with distance determine the "
+        "charge.\n"
+        "- **Value of the contents**, which sets the compensation limit if a "
+        "parcel is lost or damaged. It is not the postage, and it is not what "
+        "you pay."
     )
 
-    st.markdown("### External services")
+    st.markdown("### Booking with ISA")
     st.markdown(
-        "- **India Post PIN lookup** confirms that a destination exists and "
-        "returns its real district and state. If it is unreachable, the "
-        "assistant says so and preserves your draft rather than guessing.\n"
-        "- **OpenStreetMap geocoding** converts PIN codes to coordinates so the "
-        "distance between origin and destination can be calculated. If a PIN "
-        "cannot be located, the distance is reported as unknown rather than "
-        "estimated."
+        "ISA is our booking assistant. It takes the details in conversation "
+        "rather than as a form, applies the same published conditions as any "
+        "other booking, and shows you the full shipment for review before "
+        "anything is confirmed."
     )
 
-    st.markdown("### Known limitations")
-    st.markdown(
-        "- Document review is simulated. A supplied file is recorded as "
-        "received; its contents are never read, and it is never described as "
-        "verified.\n"
-        "- Prices are this application's own estimate, not a carrier quote.\n"
-        "- Tracking references are generated by this application and are not "
-        "carrier air waybills.\n"
-        "- Sign-in is not production-grade: there are no sessions or tokens."
+    st.markdown("### Notes on this build")
+    st.caption(
+        "This application was built for the IndiaShipments AI Shipment Agent "
+        "Challenge. Tracking references are generated by this application and "
+        "are not carrier air waybills; prices are this application's own "
+        "estimate rather than a carrier quote; and document review is "
+        "simulated, so an uploaded file is recorded as received but never "
+        "described as verified."
     )

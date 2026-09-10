@@ -9,20 +9,6 @@ from ui import api, styles
 PROBLEM_STATUSES = {"Delivery failed", "Returned", "Cancelled"}
 
 
-def header() -> None:
-    customer = st.session_state.get("customer")
-    who = f"Signed in as {customer['name']}" if customer else "Not signed in"
-    st.markdown(
-        f"""
-        <div class="is-header">
-          <div class="is-logo">India<span>Shipments</span></div>
-          <div class="is-who">{who}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
 def _format_time(value: str | None) -> str:
     if not value:
         return ""

@@ -33,18 +33,24 @@ STATUS_COLOURS = {
 
 CSS = f"""
 <style>
-  .block-container {{ padding-top: 2.2rem; max-width: 1180px; }}
+  /* Streamlit's own toolbar overlaps the first row, which was clipping the
+     navigation buttons. Push the content below it. */
+  .block-container {{ padding-top: 4.2rem; max-width: 1200px; }}
+  header[data-testid="stHeader"] {{ background: transparent; height: 0; }}
   h1, h2, h3 {{ color: {INK}; letter-spacing: -0.01em; }}
 
-  /* --- brand header --- */
-  .is-header {{
-      display: flex; align-items: center; justify-content: space-between;
-      gap: 1rem; padding: 0 0 1rem 0; border-bottom: 1px solid {BORDER};
-      margin-bottom: 1.6rem;
+  /* --- brand + navigation --- */
+  .is-brand {{
+      font-size: 1.4rem; font-weight: 800; color: {BRAND};
+      letter-spacing: -0.02em; line-height: 2.4rem;
   }}
-  .is-logo {{ font-size: 1.25rem; font-weight: 700; color: {BRAND}; }}
-  .is-logo span {{ color: {ACCENT}; }}
-  .is-who {{ color: {MUTED}; font-size: 0.9rem; }}
+  .is-brand span {{ color: {ACCENT}; }}
+  .is-navrule {{
+      border-bottom: 1px solid {BORDER}; margin: .5rem 0 1.8rem 0;
+  }}
+
+  /* --- scrollable chat --- */
+  .is-chatwrap {{ margin-bottom: .6rem; }}
 
   /* --- hero --- */
   .is-hero {{
