@@ -50,10 +50,11 @@ def _send(message: str) -> None:
     """Ask the backend for a reply to a message already on screen."""
     customer = st.session_state.get("customer") or {}
     try:
-        with st.spinner("ISA is working on that..."):
-            turn = api.send_message(
-                st.session_state["session_id"], message, customer.get("id")
-            )
+        # No spinner here: the typing indicator inside the conversation already
+        # says the same thing, in the place the user is looking.
+        turn = api.send_message(
+            st.session_state["session_id"], message, customer.get("id")
+        )
     except api.BackendUnavailable as exc:
         st.session_state["messages"].append(
             {"role": "assistant", "content": f"{exc}", "error": True}
