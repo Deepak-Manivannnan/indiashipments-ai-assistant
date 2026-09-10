@@ -1,0 +1,210 @@
+"""Failure paths.
+
+The brief asks for honest behaviour when things go wrong: an unreachable
+service, a model that cannot be called, tracking that cannot support the
+answer the user wants. These are the tests for that, and they matter more than
+the happy path -- a booking that works when everything is up is not the part
+that is hard.
+"""
+
+import uuid
+
+import httpx
+import pytest
+
+from app import auth, tools
+from app.agent import loop
+from app.rules import validate_draft
+from app.services import geocode, pin_api
+
+VALID_DRAFT = {
+    "sender_name": "Rahul Menon", "sender_phone": "9847012345",
+    "sender_address": "12 Marine Drive", "sender_city": "Kochi",
+    "sender_state": "Kerala", "sender_pin": "682031",
+    "recipient_name": "Anil Kumar", "recipient_phone": "9880123456",
+    "recipient_address": "44 MG Road", "recipient_city": "Bengaluru",
+    "recipient_state": "Karnataka", "recipient_pin": "560001",
+    "weight_g": 2000, "length_mm": 300, "width_mm": 200, "height_mm": 150,
+    "service_type": "Standard", "contents": "Books", "declared_value": 900,
+}
+
+
+@pytest.fixture
+def signed_in_session():
+    sid = f"fail-{uuid.uuid4().hex[:12]}"
+    account = auth.authenticate("rahul@example.com", "demo1234")
+    assert account["ok"], "seed the database before running the tests"
+    tools.bind_session(sid, account["customer"]["id"])
+    yield sid
+
+    from sqlalchemy import select
+
+    from app.db import SessionLocal
+    from app.models import ConversationState, Shipment
+
+    db = SessionLocal()
+    try:
+        state = db.get(ConversationState, sid)
+        if state:
+            if state.draft_shipment_id:
+                shipment = db.get(Shipment, state.draft_shipment_id)
+                if shipment is not None:
+                    db.delete(shipment)
+            db.delete(state)
+        db.commit()
+    finally:
+        db.close()
+
+
+@pytest.fixture
+def pin_service_down(monkeypatch):
+    """Every PIN lookup times out."""
+    pin_api.clear_cache()
+
+    def unreachable(*args, **kwargs):
+        raise httpx.ConnectTimeout("simulated outage")
+
+    monkeypatch.setattr(httpx, "get", unreachable)
+    yield
+    pin_api.clear_cache()
+
+
+# ---------------------------------------------------------------------------
+# The PIN service is unreachable
+# ---------------------------------------------------------------------------
+
+def test_pin_lookup_reports_an_outage_rather_than_raising(pin_service_down):
+    result = pin_api.lookup_pin("682031")
+
+    assert result["status"] == "unavailable"
+    assert "not reachable" in result["message"]
+
+
+def test_an_outage_is_not_mistaken_for_an_unserviceable_pin(pin_service_down):
+    """A service that is down must never look like a rejected address."""
+    result = tools.check_pin_serviceability("682031", city="Kochi")
+
+    assert result["ok"] is True          # the tool itself did not fail
+    assert result["serviceable"] is False  # but nothing was confirmed
+    assert result["status"] == "unavailable"
+    assert result["status"] != pin_api.STATUS_NOT_SERVICEABLE
+
+
+def test_an_outage_warns_but_does_not_block_the_booking(pin_service_down):
+    """The brief: fail clearly and keep the draft. Not: refuse to proceed."""
+    draft = {
+        "sender": {"name": "A", "phone": "9", "address": "x", "city": "Kochi",
+                   "state": "Kerala", "pin": "682031"},
+        "recipient": {"name": "B", "phone": "9", "address": "y",
+                      "city": "Bengaluru", "state": "Karnataka", "pin": "560001"},
+        "package": {"weight_g": 2000, "length_mm": 300, "width_mm": 200,
+                    "height_mm": 150},
+        "service_type": "Standard", "contents": "Books", "declared_value": 900,
+        "pin_checks": {"sender": pin_api.lookup_pin("682031")},
+    }
+    result = validate_draft(draft)
+
+    assert result.ok is True
+    assert any("could not be verified" in w for w in result.warnings)
+    assert result.errors == []
+
+
+def test_the_draft_survives_an_outage(signed_in_session, pin_service_down):
+    tools.save_draft(session_id=signed_in_session, **VALID_DRAFT)
+    tools.validate_shipment(signed_in_session)
+
+    summary = tools.get_summary(signed_in_session)
+    assert summary["ok"] is True
+    assert summary["draft"]["sender"]["city"] == "Kochi"
+    assert summary["still_missing"] == []
+
+
+# ---------------------------------------------------------------------------
+# Geocoding is unreachable
+# ---------------------------------------------------------------------------
+
+def test_distance_is_unknown_rather_than_guessed(monkeypatch):
+    geocode.clear_cache()
+    monkeypatch.setattr(
+        geocode, "_query_nominatim",
+        lambda params: (_ for _ in ()).throw(httpx.ConnectTimeout("down")),
+    )
+
+    result = tools.calculate_distance("682031", "560001")
+    assert result["status"] == "unknown"
+    assert result["distance_km"] is None
+    geocode.clear_cache()
+
+
+def test_no_price_is_invented_when_the_distance_is_unknown():
+    price = tools.estimate_price(weight_g=2000, service_type="Standard",
+                                 distance_km=None)
+    assert price["status"] == "unavailable"
+    assert "estimated_price_inr" not in price
+
+
+# ---------------------------------------------------------------------------
+# The model is unreachable
+# ---------------------------------------------------------------------------
+
+def test_a_model_outage_keeps_the_draft_and_says_so(signed_in_session, monkeypatch):
+    tools.save_draft(session_id=signed_in_session, **VALID_DRAFT)
+
+    def unavailable(*args, **kwargs):
+        raise loop.ModelUnavailable("simulated outage")
+
+    monkeypatch.setattr(loop, "_generate", unavailable)
+
+    turn = loop.run_turn(signed_in_session, "is that everything?")
+    assert turn["degraded"] is True
+    assert "nothing you've told me has been lost" in turn["reply"].lower()
+    # And it really is still there.
+    assert tools.get_summary(signed_in_session)["draft"]["contents"] == "Books"
+
+
+def test_a_tool_that_explodes_is_reported_not_hidden(signed_in_session, monkeypatch):
+    """An internal fault must reach the model as a refusal it can explain."""
+    def boom(*args, **kwargs):
+        raise RuntimeError("database on fire")
+
+    monkeypatch.setitem(loop.CALLABLE_TOOLS, "get_summary", boom)
+
+    result = loop.execute_tool("get_summary", {}, signed_in_session)
+    assert result["ok"] is False
+    assert "database on fire" in result["error"]
+    assert "do not claim it succeeded" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# Tracking that cannot support the answer
+# ---------------------------------------------------------------------------
+
+def test_an_unknown_reference_is_not_dressed_up():
+    result = tools.get_tracking("IS-9999")
+    assert result["ok"] is False
+    assert "check the reference" in result["error"]
+
+
+def test_a_failed_delivery_is_reported_as_a_failure():
+    result = tools.get_tracking("IS-1077")
+
+    assert result["status"] == "Delivery failed"
+    assert "Delivery failed" in result["explanation"]
+    assert "recipient not available" in result["explanation"].lower()
+    # The delay before it is in the history, so the agent can explain why.
+    assert any("delayed" in (e["note"] or "").lower() for e in result["events"])
+
+
+def test_tracking_never_offers_a_delivery_date():
+    """Nothing in a tracking response may imply a future date."""
+    for reference in ("IS-1001", "IS-1042", "IS-1077"):
+        explanation = tools.get_tracking(reference)["explanation"].lower()
+        for phrase in ("will arrive", "expected by", "due on", "estimated delivery",
+                       "should arrive"):
+            assert phrase not in explanation, (reference, phrase)
+
+
+def test_a_delivered_shipment_reads_as_finished():
+    result = tools.get_tracking("IS-1001")
+    assert result["status"] == "Delivered"
+    assert result["events"][-1]["status"] == "Delivered"
