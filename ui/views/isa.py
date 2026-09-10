@@ -1,16 +1,22 @@
 """Ask ISA -- the conversational booking and tracking assistant.
 
-Layout is deliberate: the conversation on the left, and on the right the
-shipment as the backend actually holds it. The user can always see what has
-been captured, what is still missing, and what is blocking a booking, so the
-agent's questions never feel arbitrary.
+Laid out as a chat widget rather than a document: the frame is a fixed height
+so the page itself does not scroll, and only the transcript moves. On the right
+sits the shipment exactly as the backend holds it, so the user can always see
+what has been captured and what is blocking a booking.
 """
 
+import html
+import re
 import uuid
 
 import streamlit as st
 
 from ui import api, components, styles
+
+# Height of the scrolling transcript. Chosen so the composer and the panel's
+# actions both stay on screen at a normal laptop height.
+CHAT_HEIGHT = 420
 
 
 def _new_session() -> str:
@@ -47,9 +53,7 @@ def _send(message: str) -> None:
         )
         return
 
-    st.session_state["messages"].append(
-        {"role": "assistant", "content": turn["reply"]}
-    )
+    st.session_state["messages"].append({"role": "assistant", "content": turn["reply"]})
     st.session_state["state"] = turn.get("state") or {}
     st.session_state["options"] = turn.get("options") or []
 
@@ -62,7 +66,6 @@ def _greeting() -> None:
 
     customer = st.session_state.get("customer") or {}
     shipments = api.my_shipments(st.session_state["session_id"])
-    st.session_state["existing"] = shipments
 
     first_name = (customer.get("name") or "there").split()[0]
     if shipments:
@@ -83,10 +86,41 @@ def _greeting() -> None:
         )
         options = ["Create a new shipment"]
 
-    st.session_state["messages"].append(
-        {"role": "assistant", "content": greeting}
-    )
+    st.session_state["messages"].append({"role": "assistant", "content": greeting})
     st.session_state["options"] = options
+
+
+def _reset() -> None:
+    api.reset_conversation(st.session_state["session_id"])
+    for key in ("session_id", "messages", "state", "options", "greeted"):
+        st.session_state.pop(key, None)
+
+
+def _as_bubble_html(text: str) -> str:
+    """Escape the message, then restore the little markdown the agent uses."""
+    safe = html.escape(text)
+    safe = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", safe)
+    return safe.replace("\n", "<br>")
+
+
+def _transcript() -> None:
+    """The conversation, in its own scrolling frame.
+
+    Rendered as bubbles rather than Streamlit's chat rows so the user's
+    messages can sit on the right, as they do in every other chat interface.
+    """
+    bubbles = []
+    for message in st.session_state["messages"]:
+        side = "user" if message["role"] == "user" else "bot"
+        css = "is-bubble error" if message.get("error") else "is-bubble"
+        bubbles.append(
+            f'<div class="is-msg {side}">'
+            f'<div class="{css}">{_as_bubble_html(message["content"])}</div>'
+            "</div>"
+        )
+
+    with st.container(height=CHAT_HEIGHT, border=False, key="isa-transcript"):
+        st.markdown("".join(bubbles), unsafe_allow_html=True)
 
 
 def _banners(state: dict) -> None:
@@ -97,7 +131,6 @@ def _banners(state: dict) -> None:
             "booking guardrails are still real.</div>",
             unsafe_allow_html=True,
         )
-
     for blocker in state.get("blockers") or []:
         st.markdown(
             f'<div class="is-banner blocked"><b>Booking paused</b> &mdash; '
@@ -110,8 +143,11 @@ def _document_upload(state: dict) -> None:
     """Appears only while a document is actually outstanding."""
     blockers = state.get("blockers") or []
     document = next(
-        (b.replace(" required", "") for b in blockers if b.endswith("required")
-         and "insurance" not in b),
+        (
+            b.replace(" required", "")
+            for b in blockers
+            if b.endswith("required") and "insurance" not in b
+        ),
         None,
     )
     if not document:
@@ -130,31 +166,15 @@ def _document_upload(state: dict) -> None:
     )
     try:
         with st.spinner("Recording the document..."):
-            turn = api.upload_document(
-                st.session_state["session_id"], document, upload
-            )
+            turn = api.upload_document(st.session_state["session_id"], document, upload)
     except api.BackendUnavailable as exc:
         st.error(str(exc))
         return
 
-    st.session_state["messages"].append(
-        {"role": "assistant", "content": turn["reply"]}
-    )
+    st.session_state["messages"].append({"role": "assistant", "content": turn["reply"]})
     st.session_state["state"] = turn.get("state") or {}
     st.session_state["options"] = turn.get("options") or []
     st.rerun()
-
-
-def _conversation() -> None:
-    """The transcript, in its own scrolling area so the page stays put."""
-    with st.container(height=460, border=False):
-        for message in st.session_state["messages"]:
-            avatar = "🧑" if message["role"] == "user" else "📦"
-            with st.chat_message(message["role"], avatar=avatar):
-                if message.get("error"):
-                    st.error(message["content"])
-                else:
-                    st.markdown(message["content"])
 
 
 def _options() -> str | None:
@@ -164,63 +184,78 @@ def _options() -> str | None:
         return None
 
     chosen = None
-    columns = st.columns(min(len(options), 4))
+    columns = st.columns(min(len(options), 3))
     for index, option in enumerate(options):
         with columns[index % len(columns)]:
-            if st.button(option, key=f"opt-{index}-{len(st.session_state['messages'])}",
-                         use_container_width=True):
+            if st.button(
+                option,
+                key=f"opt-{index}-{len(st.session_state['messages'])}",
+                use_container_width=True,
+            ):
                 chosen = option
     return chosen
 
 
+def _panel(state: dict) -> None:
+    components.draft_panel(state)
+
+    if state.get("reference"):
+        st.success(f"Booked. Your reference is {state['reference']}.")
+        return
+
+    if state.get("ready_to_book"):
+        st.markdown(
+            '<div class="is-banner ready" style="margin-top:.8rem">Everything '
+            "checks out. Review the details above, then confirm.</div>",
+            unsafe_allow_html=True,
+        )
+        if st.button("Confirm booking", type="primary", use_container_width=True):
+            _send("Yes, please confirm and book this shipment.")
+            st.rerun()
+        return
+
+    if state.get("has_draft"):
+        missing = state.get("still_missing") or []
+        if missing:
+            st.markdown(
+                f'<p class="is-muted" style="margin-top:.7rem">'
+                f"{len(missing)} detail{'s' if len(missing) > 1 else ''} still "
+                "needed before this can be booked.</p>",
+                unsafe_allow_html=True,
+            )
+        elif state.get("blockers"):
+            st.markdown(
+                '<p class="is-muted" style="margin-top:.7rem">All the details are '
+                "in. Clear the item above and the booking can go ahead.</p>",
+                unsafe_allow_html=True,
+            )
+
+
 def render() -> None:
     styles.inject()
+    styles.inject_chat_layout()
     _ensure_session()
 
     if not components.require_sign_in("use ISA"):
         return
 
     _greeting()
+    state = st.session_state.get("state") or {}
 
-    left, right = st.columns([1.55, 1], gap="large")
-
-    with right:
-        state = st.session_state.get("state") or {}
-        components.draft_panel(state)
-
-        if state.get("ready_to_book"):
-            st.markdown(
-                '<div class="is-banner ready" style="margin-top:.8rem">Everything '
-                "checks out. Review the details above, then confirm.</div>",
-                unsafe_allow_html=True,
-            )
-            if st.button("Confirm booking", type="primary", use_container_width=True):
-                _send("Yes, please confirm and book this shipment.")
-                st.rerun()
-        elif state.get("has_draft"):
-            missing = state.get("still_missing") or []
-            if missing:
-                st.markdown(
-                    f'<p class="is-muted" style="margin-top:.7rem">'
-                    f"{len(missing)} detail{'s' if len(missing) > 1 else ''} still "
-                    "needed before this can be booked.</p>",
-                    unsafe_allow_html=True,
-                )
-
-        if state.get("reference"):
-            st.success(f"Booked. Your reference is {state['reference']}.")
-
-        st.divider()
-        if st.button("Start a new conversation", use_container_width=True):
-            api.reset_conversation(st.session_state["session_id"])
-            for key in ("session_id", "messages", "state", "options", "greeted"):
-                st.session_state.pop(key, None)
-            st.rerun()
+    left, right = st.columns([1.6, 1], gap="large")
 
     with left:
-        _banners(st.session_state.get("state") or {})
-        _conversation()
-        _document_upload(st.session_state.get("state") or {})
+        title, reset = st.columns([3, 1], vertical_alignment="center")
+        with title:
+            st.markdown('<div class="is-chattitle">ISA</div>', unsafe_allow_html=True)
+        with reset:
+            if st.button("New chat", use_container_width=True, type="tertiary"):
+                _reset()
+                st.rerun()
+
+        _banners(state)
+        _transcript()
+        _document_upload(state)
 
         chosen = _options()
         typed = st.chat_input("Type your message, or pick an option above")
@@ -230,3 +265,6 @@ def render() -> None:
             st.session_state["options"] = []
             _send(message)
             st.rerun()
+
+    with right:
+        _panel(state)

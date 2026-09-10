@@ -19,12 +19,14 @@ import random
 import re
 
 from app import tools
+from app.rules import HIGH_VALUE_THRESHOLD_INR
 
 # Per-session scratch state. Process-local on purpose: this is a testing aid
 # and does not need to survive a restart.
 _last_asked: dict[str, str] = {}
 _seen_warnings: dict[str, set[str]] = {}
 _pending_conflict: dict[str, dict] = {}
+_pending_ack: dict[str, bool] = {}
 
 TRACKING_REFERENCE = re.compile(r"\b(IS-\d+)\b", re.IGNORECASE)
 NUMBER = re.compile(r"\d+(?:\.\d+)?")
@@ -190,6 +192,15 @@ def _fill_from_pin(session_id: str, role: str, calls: list) -> dict | None:
     return None
 
 
+def _needs_insurance_ack(summary: dict) -> bool:
+    value = (summary.get("draft") or {}).get("declared_value")
+    return (
+        value is not None
+        and float(value) > HIGH_VALUE_THRESHOLD_INR
+        and not summary.get("insurance_acknowledged")
+    )
+
+
 def _new_warnings(session_id: str, warnings: list[str]) -> list[str]:
     """Mention a rule the first time it applies, not on every single turn."""
     seen = _seen_warnings.setdefault(session_id, set())
@@ -199,7 +210,7 @@ def _new_warnings(session_id: str, warnings: list[str]) -> list[str]:
 
 
 def reset_session(session_id: str) -> None:
-    for store in (_last_asked, _seen_warnings, _pending_conflict):
+    for store in (_last_asked, _seen_warnings, _pending_conflict, _pending_ack):
         store.pop(session_id, None)
 
 
@@ -255,6 +266,28 @@ def stub_turn(session_id: str, message: str) -> dict:
              f"{conflict['given_city']} is correct"],
             "address_conflict", calls, None,
         )
+
+    # 1b. An outstanding insurance acknowledgement. Their answer has to be
+    #     recorded, not merely acknowledged in prose.
+    if _pending_ack.get(session_id) and text:
+        if re.search(r"\b(acknowledge|accept|agree|understood|yes|ok|okay)\b",
+                     lowered):
+            _pending_ack.pop(session_id, None)
+            _record(calls, "acknowledge_insurance", {},
+                    tools.acknowledge_insurance(session_id))
+            return _ask_next(
+                session_id, calls,
+                "Thank you -- that's recorded. ", allow_confirm=False,
+            )
+        if re.search(r"\b(reduce|lower|change|no)\b", lowered):
+            _pending_ack.pop(session_id, None)
+            _last_asked[session_id] = "declared_value"
+            return _respond(
+                session_id,
+                "No problem. What value should I record for the contents "
+                "instead?",
+                [], None, calls, None,
+            )
 
     # 2. Tracking, whenever a reference is mentioned.
     reference = TRACKING_REFERENCE.search(text)
@@ -385,21 +418,56 @@ def _ask_next(session_id: str, calls: list, prefix: str, allow_confirm) -> dict:
 
     ask_next = summary.get("ask_next")
     if ask_next is None:
-        blockers = summary.get("pending_documents") or []
-        if blockers:
-            reply = f"Before I can book this I still need the {', '.join(blockers)}."
-        else:
-            draft = summary["draft"]
-            reply = (
+        _last_asked.pop(session_id, None)
+
+        # Nothing is missing, but the draft may still not be bookable. Say what
+        # is actually holding it up rather than announcing a summary and
+        # inviting a confirmation that the guardrails would refuse.
+        if not summary.get("ready_to_book"):
+            documents = summary.get("pending_documents") or []
+            if documents:
+                return _respond(
+                    session_id,
+                    prefix + "Before I can book this I still need the "
+                    f"{', '.join(documents)}. You can attach it below.",
+                    [], None, calls, None,
+                )
+
+            if _needs_insurance_ack(summary):
+                _pending_ack[session_id] = True
+                return _respond(
+                    session_id,
+                    prefix + (
+                        f"The contents are declared at Rs "
+                        f"{float(summary['draft']['declared_value']):,.0f}, which "
+                        f"is above Rs {HIGH_VALUE_THRESHOLD_INR:,}. Our liability "
+                        "is limited unless the parcel is insured, so I need you "
+                        "to acknowledge that before I can book it."
+                    ),
+                    ["I acknowledge this", "Reduce the declared value"],
+                    "insurance", calls, None,
+                )
+
+            return _respond(
+                session_id,
+                prefix + "This shipment cannot be booked yet. "
+                + " ".join(validation.get("errors") or []),
+                [], None, calls, None,
+            )
+
+        draft = summary["draft"]
+        return _respond(
+            session_id,
+            prefix + (
                 f"Here's the shipment: {draft['sender'].get('name')} in "
                 f"{draft['sender'].get('city')} sending {draft.get('contents')} to "
                 f"{draft['recipient'].get('name')} in "
                 f"{draft['recipient'].get('city')}, by "
                 f"{draft.get('service_type')}. Use Confirm booking when you're "
                 "happy with it, or tell me what to change."
-            )
-        _last_asked.pop(session_id, None)
-        return _respond(session_id, prefix + reply, [], None, calls, None)
+            ),
+            [], None, calls, None,
+        )
 
     field = validation.get("ask_next_field") or ""
     _last_asked[session_id] = field

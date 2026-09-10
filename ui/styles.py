@@ -49,8 +49,32 @@ CSS = f"""
       border-bottom: 1px solid {BORDER}; margin: .5rem 0 1.8rem 0;
   }}
 
-  /* --- scrollable chat --- */
-  .is-chatwrap {{ margin-bottom: .6rem; }}
+  /* --- chat bubbles --- */
+  .is-chattitle {{
+      font-size: 1.35rem; font-weight: 700; color: {INK}; line-height: 2.2rem;
+  }}
+  .is-msg {{ display: flex; margin: .3rem 0; }}
+  .is-msg.bot {{ justify-content: flex-start; }}
+  .is-msg.user {{ justify-content: flex-end; }}
+  .is-bubble {{
+      max-width: 82%; padding: .55rem .85rem; border-radius: 14px;
+      font-size: .93rem; line-height: 1.5; word-wrap: break-word;
+  }}
+  .is-msg.bot .is-bubble {{
+      background: {SURFACE}; color: {INK}; border-bottom-left-radius: 4px;
+  }}
+  .is-msg.user .is-bubble {{
+      background: {BRAND}; color: #fff; border-bottom-right-radius: 4px;
+  }}
+  .is-bubble.error {{ background: #FBE9E7; color: {DANGER}; }}
+
+  /* --- equal-height card rows --- */
+  .is-cards [data-testid="stColumn"] {{ display: flex; }}
+  .is-cards [data-testid="stColumn"] > div {{
+      width: 100%; display: flex; flex-direction: column;
+  }}
+  .is-cards [data-testid="stColumn"] .is-card {{ flex: 1 1 auto; }}
+  .is-cards [data-testid="stVerticalBlock"] {{ height: 100%; }}
 
   /* --- hero --- */
   .is-hero {{
@@ -142,3 +166,27 @@ def chip(status: str) -> str:
         f'<span class="is-chip" style="color:{colour};background:{background}">'
         f"{status}</span>"
     )
+
+
+CHAT_LAYOUT_CSS = """
+<style>
+  /* On the assistant page the frame is fixed and only the transcript moves.
+     Streamlit's own scroll container is pinned so the composer stays put. */
+  section[data-testid="stMain"] {{ overflow: hidden !important; }}
+  section[data-testid="stMain"] .block-container {{
+      padding-bottom: 0.5rem !important;
+  }}
+  .st-key-isa-transcript {{
+      border: 1px solid {border}; border-radius: 12px;
+      padding: .8rem 1rem; background: #fff;
+  }}
+  /* Keep the composer inline with the column rather than pinned across the
+     whole viewport, so it sits directly under the transcript. */
+  div[data-testid="stChatInput"] {{ margin-top: .4rem; }}
+</style>
+""".format(border=BORDER)
+
+
+def inject_chat_layout() -> None:
+    """Extra styling used only by the assistant page."""
+    st.markdown(CHAT_LAYOUT_CSS, unsafe_allow_html=True)

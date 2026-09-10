@@ -16,6 +16,20 @@ def _card(title: str, body: str) -> str:
     return f'<div class="is-card"><h4>{title}</h4><p>{body}</p></div>'
 
 
+def _card_row(cards: list[tuple[str, str]]) -> None:
+    """A row of cards that all end up the same height.
+
+    Streamlit columns size to their own content, so three cards with different
+    amounts of text come out ragged. The wrapper lets the CSS stretch them.
+    """
+    st.markdown('<div class="is-cards">', unsafe_allow_html=True)
+    columns = st.columns(len(cards), gap="medium")
+    for column, (title, body) in zip(columns, cards):
+        with column:
+            st.markdown(_card(title, body), unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
 # ---------------------------------------------------------------------------
 # Home
 # ---------------------------------------------------------------------------
@@ -49,7 +63,6 @@ def home() -> None:
             unsafe_allow_html=True,
         )
 
-    columns = st.columns(3)
     cards = [
         ("Nationwide coverage",
          "We deliver to every PIN code in the India Post directory. Addresses "
@@ -64,28 +77,16 @@ def home() -> None:
          "If a delivery is delayed or an attempt fails, we say so plainly "
          "rather than leaving you guessing."),
     ]
-    for column, (title, body) in zip(columns, cards):
-        with column:
-            st.markdown(_card(title, body), unsafe_allow_html=True)
+    _card_row(cards)
 
     st.write("")
     st.markdown("### Booking a parcel")
-    steps = st.columns(4)
-    for column, (number, text) in zip(
-        steps,
-        [
-            ("1", "Give us the collection and delivery addresses"),
-            ("2", "Tell us what is inside and what it weighs"),
-            ("3", "Review the shipment and the applicable conditions"),
-            ("4", "Confirm, and we send you a tracking reference"),
-        ],
-    ):
-        with column:
-            st.markdown(
-                f'<div class="is-card"><h4 style="color:#0F4C81">{number}</h4>'
-                f"<p>{text}</p></div>",
-                unsafe_allow_html=True,
-            )
+    _card_row([
+        ("1", "Give us the collection and delivery addresses"),
+        ("2", "Tell us what is inside and what it weighs"),
+        ("3", "Review the shipment and the applicable conditions"),
+        ("4", "Confirm, and we send you a tracking reference"),
+    ])
 
     st.write("")
     st.caption(
@@ -108,19 +109,12 @@ def services() -> None:
         unsafe_allow_html=True,
     )
 
-    left, right = st.columns(2)
-    with left:
-        st.markdown(
-            _card("Standard", "Our everyday service for parcels that are not "
-                              "time critical."),
-            unsafe_allow_html=True,
-        )
-    with right:
-        st.markdown(
-            _card("Express", "Faster handling for urgent parcels and "
-                             "perishables."),
-            unsafe_allow_html=True,
-        )
+    _card_row([
+        ("Standard",
+         "Our everyday service for parcels that are not time critical."),
+        ("Express",
+         "Faster handling for urgent parcels and perishables."),
+    ])
 
     st.write("")
     st.markdown("### What you can send")
@@ -250,25 +244,20 @@ def about() -> None:
     )
 
     st.write("")
-    columns = st.columns(3)
-    for column, (title, body) in zip(
-        columns,
-        [
-            ("Our network",
-             "Collections and deliveries across every serviceable PIN code in "
-             "India, moving through regional hubs to the destination city."),
-            ("How we work",
-             "Addresses are verified before a parcel is accepted, contents are "
-             "checked against our published conditions, and every parcel is "
-             "tracked from collection to delivery."),
-            ("Being straight with you",
-             "We do not promise delivery dates we cannot support, and when a "
-             "delivery is delayed or fails we tell you what actually happened "
-             "and what to do next."),
-        ],
-    ):
-        with column:
-            st.markdown(_card(title, body), unsafe_allow_html=True)
+    _card_row([
+        ("Our network",
+         "Collections and deliveries across every serviceable PIN code in "
+         "India, moving through regional hubs to the destination city and out "
+         "for delivery from there."),
+        ("How we work",
+         "Addresses are verified before a parcel is accepted, contents are "
+         "checked against our published conditions, and every parcel is "
+         "tracked from collection to delivery."),
+        ("Being straight with you",
+         "We do not promise delivery dates we cannot support, and when a "
+         "delivery is delayed or fails we tell you what actually happened and "
+         "what to do next."),
+    ])
 
     st.write("")
     st.markdown("### What we ask for, and why")
