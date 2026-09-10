@@ -26,7 +26,13 @@ from app.constants import (
     STATUS_DRAFT,
 )
 from app.db import SessionLocal
-from app.models import ConversationState, Document, Shipment, TrackingEvent
+from app.models import (
+    ConversationState,
+    Customer,
+    Document,
+    Shipment,
+    TrackingEvent,
+)
 from app.rules import (
     CONTENTS_CATEGORIES,
     HIGH_VALUE_THRESHOLD_INR,
@@ -235,6 +241,86 @@ def save_draft(
             }
 
         return payload
+
+
+def bind_session(session_id: str, customer_id: int) -> dict:
+    """Attach a signed-in customer to this conversation.
+
+    Called by the application at sign-in, not by the model -- the model must
+    never be able to decide who it is acting for.
+    """
+    with session_scope() as db:
+        customer = db.get(Customer, customer_id)
+        if customer is None:
+            return _fail(f"No customer {customer_id} exists.")
+        state = _get_state(db, session_id)
+        state.customer_id = customer_id
+        return {"ok": True, "session_id": session_id, "customer": customer.name}
+
+
+def prefill_sender_from_profile(session_id: str) -> dict:
+    """Fill the sender block from the signed-in customer's saved details.
+
+    This is why accounts exist: the user should not retype an address the
+    application already holds.
+    """
+    with session_scope() as db:
+        state = _get_state(db, session_id)
+        if state.customer_id is None:
+            return _fail("Nobody is signed in on this conversation.")
+        customer = db.get(Customer, state.customer_id)
+        if customer is None:
+            return _fail("The signed-in customer no longer exists.")
+
+        sender = customer.as_sender()
+        missing = [key for key, value in sender.items() if not value]
+
+    saved = save_draft(
+        session_id=session_id,
+        **{f"sender_{key}": value for key, value in sender.items() if value},
+    )
+    return {
+        "ok": True,
+        "sender": sender,
+        "still_missing_from_profile": missing,
+        "ask_next": saved.get("ask_next"),
+        "note": (
+            "The sender details now come from the user's saved profile. Tell "
+            "them which details you have used rather than asking for them "
+            "again, and ask only for anything the profile did not cover."
+        ),
+    }
+
+
+def list_my_shipments(session_id: str) -> dict:
+    """The signed-in customer's shipments, newest first."""
+    with session_scope() as db:
+        state = _get_state(db, session_id)
+        if state.customer_id is None:
+            return _fail("Nobody is signed in on this conversation.")
+
+        shipments = db.scalars(
+            select(Shipment)
+            .where(
+                Shipment.customer_id == state.customer_id,
+                Shipment.reference.is_not(None),
+            )
+            .order_by(Shipment.id.desc())
+        ).all()
+
+        return {
+            "ok": True,
+            "count": len(shipments),
+            "shipments": [
+                {
+                    "reference": s.reference,
+                    "status": s.status,
+                    "to_city": (s.recipient_json or {}).get("city"),
+                    "contents": s.contents,
+                }
+                for s in shipments
+            ],
+        }
 
 
 def check_contents(description: str) -> dict:
@@ -638,6 +724,15 @@ def confirm_booking(session_id: str) -> dict:
         if shipment is None:
             return _fail("There is no shipment draft to book for this conversation.")
 
+        state = _get_state(db, session_id)
+        if state.customer_id is None:
+            return _fail(
+                "A shipment can only be booked by a signed-in customer, and "
+                "nobody is signed in on this conversation. Ask the user to sign "
+                "in; their draft is saved and will be waiting.",
+                blocked_by="not_signed_in",
+            )
+
         if not shipment.validated:
             return _fail(
                 "This shipment has not passed validation yet, so it cannot be "
@@ -666,6 +761,7 @@ def confirm_booking(session_id: str) -> dict:
 
         shipment.reference = _next_reference(db, shipment.id)
         shipment.status = STATUS_BOOKED
+        shipment.customer_id = state.customer_id
         db.add(
             TrackingEvent(
                 shipment_id=shipment.id,
@@ -676,7 +772,6 @@ def confirm_booking(session_id: str) -> dict:
             )
         )
 
-        state = _get_state(db, session_id)
         state.draft_shipment_id = None  # the draft is now a real shipment
 
         return {

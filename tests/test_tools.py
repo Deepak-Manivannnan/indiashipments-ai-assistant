@@ -10,7 +10,7 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from app import tools
+from app import auth, tools
 from app.constants import STATUS_BOOKED, STATUS_DRAFT
 from app.db import SessionLocal
 from app.models import ConversationState, Document, Shipment
@@ -46,8 +46,11 @@ VALID_PACKAGE = {
 SEEDED_REFERENCES = {"IS-1001", "IS-1042", "IS-1077"}
 
 
-@pytest.fixture
-def session_id():
+DEMO_EMAIL = "rahul@example.com"
+DEMO_PASSWORD = "demo1234"
+
+
+def _conversation(signed_in: bool):
     """A fresh conversation, with everything it created removed afterwards.
 
     Shipment ids are recorded as the test runs rather than matched by content,
@@ -55,6 +58,11 @@ def session_id():
     """
     sid = f"test-{uuid.uuid4().hex[:12]}"
     created: set[int] = set()
+
+    if signed_in:
+        account = auth.authenticate(DEMO_EMAIL, DEMO_PASSWORD)
+        assert account["ok"], "seed the database before running the tests"
+        tools.bind_session(sid, account["customer"]["id"])
 
     def remember():
         db = SessionLocal()
@@ -93,6 +101,18 @@ def session_id():
         db.commit()
     finally:
         db.close()
+
+
+@pytest.fixture
+def session_id():
+    """A conversation with a signed-in customer -- the normal case."""
+    yield from _conversation(signed_in=True)
+
+
+@pytest.fixture
+def anonymous_session():
+    """A conversation with nobody signed in."""
+    yield from _conversation(signed_in=False)
 
 
 def fill_valid_draft(session_id, **overrides):
@@ -431,3 +451,94 @@ def test_an_unchanged_declared_value_keeps_the_acknowledgement(session_id):
     fill_valid_draft(session_id, declared_value=60000)  # unchanged
     tools.validate_shipment(session_id)
     assert tools.confirm_booking(session_id)["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# Accounts and ownership
+# ---------------------------------------------------------------------------
+
+def test_passwords_are_salted_and_never_stored_in_the_clear():
+    first = auth.hash_password("demo1234")
+    second = auth.hash_password("demo1234")
+
+    assert "demo1234" not in first
+    assert first != second  # a fresh salt each time
+    assert auth.verify_password("demo1234", first)
+    assert not auth.verify_password("demo1233", first)
+    assert not auth.verify_password("", first)
+
+
+def test_sign_in_rejects_a_wrong_password_without_revealing_which_part_failed():
+    unknown = auth.authenticate("nobody@example.com", "demo1234")
+    wrong = auth.authenticate("rahul@example.com", "not-the-password")
+
+    assert unknown["ok"] is False
+    assert wrong["ok"] is False
+    assert unknown["error"] == wrong["error"]
+
+
+def test_demo_accounts_exist_and_each_owns_a_different_scenario():
+    accounts = auth.list_demo_accounts()
+    assert len(accounts) == 3
+    assert all("password_hash" not in a for a in accounts)
+
+    signed_in = auth.authenticate("priya@example.com", "demo1234")
+    assert signed_in["ok"] is True
+
+
+def test_booking_is_refused_when_nobody_is_signed_in(anonymous_session):
+    fill_valid_draft(anonymous_session)
+    tools.validate_shipment(anonymous_session)
+
+    result = tools.confirm_booking(anonymous_session)
+    assert result["ok"] is False
+    assert result["blocked_by"] == "not_signed_in"
+
+
+def test_a_booked_shipment_belongs_to_the_customer_who_booked_it(session_id):
+    customer = auth.authenticate("rahul@example.com", "demo1234")["customer"]
+    tools.bind_session(session_id, customer["id"])
+
+    fill_valid_draft(session_id)
+    tools.validate_shipment(session_id)
+    booking = tools.confirm_booking(session_id)
+    assert booking["ok"] is True
+
+    db = SessionLocal()
+    try:
+        stored = db.scalars(
+            select(Shipment).where(Shipment.reference == booking["reference"])
+        ).one()
+        assert stored.customer_id == customer["id"]
+    finally:
+        db.close()
+
+
+def test_the_profile_fills_in_the_sender_so_it_is_not_asked_for_again(session_id):
+    customer = auth.authenticate("priya@example.com", "demo1234")["customer"]
+    tools.bind_session(session_id, customer["id"])
+
+    result = tools.prefill_sender_from_profile(session_id)
+    assert result["ok"] is True
+    assert result["sender"]["city"] == "Chennai"
+    assert result["still_missing_from_profile"] == []
+
+    summary = tools.get_summary(session_id)
+    assert summary["draft"]["sender"]["pin"] == "600002"
+    # None of the six sender fields should still be outstanding.
+    assert not any("sender" in field for field in summary["still_missing"])
+
+
+def test_prefill_and_shipment_list_refuse_when_signed_out(anonymous_session):
+    assert tools.prefill_sender_from_profile(anonymous_session)["ok"] is False
+    assert tools.list_my_shipments(anonymous_session)["ok"] is False
+
+
+def test_customers_only_see_their_own_shipments(session_id):
+    customer = auth.authenticate("imran@example.com", "demo1234")["customer"]
+    tools.bind_session(session_id, customer["id"])
+
+    result = tools.list_my_shipments(session_id)
+    assert result["ok"] is True
+    references = [s["reference"] for s in result["shipments"]]
+    assert references == ["IS-1077"]  # not IS-1001 or IS-1042

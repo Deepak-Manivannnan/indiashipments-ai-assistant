@@ -77,6 +77,24 @@ DECLARATIONS = [
         ),
     ),
     types.FunctionDeclaration(
+        name="prefill_sender_from_profile",
+        description=(
+            "Fill the sender details from the signed-in customer's saved "
+            "profile. Use this instead of asking the user for their own name, "
+            "phone and address when they are sending the parcel themselves."
+        ),
+        parameters=_schema({}),
+    ),
+    types.FunctionDeclaration(
+        name="list_my_shipments",
+        description=(
+            "List the signed-in customer's existing shipments and their "
+            "statuses. Use it when they ask about their orders, or to offer "
+            "them something to track."
+        ),
+        parameters=_schema({}),
+    ),
+    types.FunctionDeclaration(
         name="get_summary",
         description=(
             "Read back the current draft, what is still missing, any blockers, "
@@ -199,6 +217,8 @@ SESSION_SCOPED = {
     "request_document",
     "acknowledge_insurance",
     "confirm_booking",
+    "prefill_sender_from_profile",
+    "list_my_shipments",
 }
 
 # submit_document is intentionally absent: files arrive through the upload
@@ -208,6 +228,8 @@ CALLABLE_TOOLS = {
     "get_summary": tools.get_summary,
     "list_options": tools.list_options,
     "check_contents": tools.check_contents,
+    "prefill_sender_from_profile": tools.prefill_sender_from_profile,
+    "list_my_shipments": tools.list_my_shipments,
     "check_pin_serviceability": tools.check_pin_serviceability,
     "validate_shipment": tools.validate_shipment,
     "request_document": tools.request_document,

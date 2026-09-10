@@ -36,9 +36,28 @@ class ShipmentDetailOut(ShipmentSummaryOut):
     tracking_events: list[TrackingEventOut] = []
 
 
+class SignUpRequest(BaseModel):
+    email: str
+    password: str
+    name: str
+    phone: str | None = None
+    address: str | None = None
+    city: str | None = None
+    state: str | None = None
+    pin: str | None = None
+
+
+class SignInRequest(BaseModel):
+    email: str
+    password: str
+
+
 class ChatRequest(BaseModel):
     session_id: str
     message: str
+    # Binds the conversation to the signed-in customer. Supplied by the
+    # application after sign-in, never chosen by the model.
+    customer_id: int | None = None
 
 
 class ChatResponse(BaseModel):

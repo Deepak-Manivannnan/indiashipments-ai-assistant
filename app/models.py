@@ -36,6 +36,11 @@ class Shipment(Base):
     reference: Mapped[str | None] = mapped_column(
         String(32), unique=True, index=True, nullable=True
     )
+    # Set when the booking is confirmed. A draft may exist before the customer
+    # is known, but a booked shipment always belongs to someone.
+    customer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     status: Mapped[str] = mapped_column(String(32), default=STATUS_DRAFT, index=True)
 
     sender_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -63,6 +68,45 @@ class Shipment(Base):
     documents: Mapped[list["Document"]] = relationship(
         back_populates="shipment", cascade="all, delete-orphan"
     )
+    customer: Mapped["Customer | None"] = relationship(back_populates="shipments")
+
+
+class Customer(Base):
+    """A signed-in user.
+
+    The address fields are not decoration: they let the agent pre-fill the
+    sender block instead of asking six questions the user has already answered
+    once.
+    """
+
+    __tablename__ = "customers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+
+    name: Mapped[str] = mapped_column(String(120))
+    phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    address: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    state: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    pin: Mapped[str | None] = mapped_column(String(6), nullable=True)
+
+    is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    shipments: Mapped[list["Shipment"]] = relationship(back_populates="customer")
+
+    def as_sender(self) -> dict:
+        """This customer's details, shaped like a shipment's sender block."""
+        return {
+            "name": self.name,
+            "phone": self.phone,
+            "address": self.address,
+            "city": self.city,
+            "state": self.state,
+            "pin": self.pin,
+        }
 
 
 class TrackingEvent(Base):
@@ -111,6 +155,10 @@ class ConversationState(Base):
     session_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     draft_shipment_id: Mapped[int | None] = mapped_column(
         ForeignKey("shipments.id", ondelete="SET NULL"), nullable=True
+    )
+    # Bound at sign-in. confirm_booking refuses without it.
+    customer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"), nullable=True, index=True
     )
     # Carried back into the next model turn so the agent can self-correct.
     last_tool_error: Mapped[str | None] = mapped_column(Text, nullable=True)

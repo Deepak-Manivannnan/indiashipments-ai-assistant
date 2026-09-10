@@ -23,10 +23,52 @@ from app.constants import (
     STATUS_OUT_FOR_DELIVERY,
     STATUS_PICKED_UP,
 )
+from app.auth import hash_password
 from app.db import SessionLocal
-from app.models import Shipment, TrackingEvent
+from app.models import Customer, Shipment, TrackingEvent
 
 NOW = datetime.now(timezone.utc).replace(microsecond=0)
+
+# Demo logins shown on the sign-in page, so a reviewer never has to register.
+# Each owns one of the seeded scenarios, which is what makes their Orders page
+# show something different from each other.
+DEMO_PASSWORD = "demo1234"
+
+DEMO_CUSTOMERS = [
+    {
+        "email": "rahul@example.com",
+        "name": "Rahul Menon",
+        "phone": "9847012345",
+        "address": "12 Marine Drive",
+        "city": "Kochi",
+        "state": "Kerala",
+        "pin": "682031",
+        "owns": "IS-1001",
+        "shows": "a delivered shipment",
+    },
+    {
+        "email": "priya@example.com",
+        "name": "Priya Raghavan",
+        "phone": "9840055667",
+        "address": "8 Anna Salai",
+        "city": "Chennai",
+        "state": "Tamil Nadu",
+        "pin": "600002",
+        "owns": "IS-1042",
+        "shows": "a shipment out for delivery",
+    },
+    {
+        "email": "imran@example.com",
+        "name": "Imran Shaikh",
+        "phone": "9820011223",
+        "address": "5 Linking Road",
+        "city": "Mumbai",
+        "state": "Maharashtra",
+        "pin": "400050",
+        "owns": "IS-1077",
+        "shows": "a failed delivery",
+    },
+]
 
 
 def ago(days: float = 0, hours: float = 0) -> datetime:
@@ -123,9 +165,37 @@ SEEDS = [
 ]
 
 
+def seed_customers(db) -> dict:
+    """Create the demo accounts. Returns reference -> customer id."""
+    owners = {}
+    for spec in DEMO_CUSTOMERS:
+        customer = (
+            db.query(Customer).filter_by(email=spec["email"]).one_or_none()
+        )
+        if customer is None:
+            customer = Customer(
+                email=spec["email"],
+                password_hash=hash_password(DEMO_PASSWORD),
+                name=spec["name"],
+                phone=spec["phone"],
+                address=spec["address"],
+                city=spec["city"],
+                state=spec["state"],
+                pin=spec["pin"],
+                is_demo=True,
+            )
+            db.add(customer)
+            db.flush()
+        owners[spec["owns"]] = customer.id
+        print(f"demo account {spec['email']:<20} {spec['shows']}")
+    return owners
+
+
 def main() -> None:
     db = SessionLocal()
     try:
+        owners = seed_customers(db)
+        print()
         for spec in SEEDS:
             events = spec["events"]
             fields = {k: v for k, v in spec.items() if k != "events"}
@@ -136,7 +206,11 @@ def main() -> None:
                 db.delete(existing)  # cascades to its tracking events
                 db.flush()
 
-            shipment = Shipment(**fields, validated=True)
+            shipment = Shipment(
+                **fields,
+                validated=True,
+                customer_id=owners.get(spec["reference"]),
+            )
             shipment.tracking_events = [
                 TrackingEvent(status=s, event_time=t, location=loc, note=note)
                 for s, t, loc, note in events
@@ -147,7 +221,7 @@ def main() -> None:
                 f"({len(events)} events)"
             )
         db.commit()
-        print("\nseed complete")
+        print(f"\nseed complete -- password for every demo account: {DEMO_PASSWORD}")
     finally:
         db.close()
 

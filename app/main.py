@@ -13,17 +13,25 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.agent.loop import reset_conversation, run_turn
+from app.auth import authenticate, create_customer, list_demo_accounts
 from app.db import get_db
 from app.models import Shipment
 from app.schemas import (
     ChatRequest,
     ChatResponse,
     ResetRequest,
+    SignInRequest,
+    SignUpRequest,
     ShipmentDetailOut,
     ShipmentSummaryOut,
     TrackingOut,
 )
-from app.tools import build_tracking_response, submit_document
+from app.tools import (
+    bind_session,
+    build_tracking_response,
+    list_my_shipments,
+    submit_document,
+)
 
 # Uploaded documents are kept out of the repository.
 UPLOAD_DIR = Path("uploads")
@@ -35,6 +43,36 @@ app = FastAPI(
 )
 
 
+@app.post("/auth/signup")
+def signup(request: SignUpRequest) -> dict:
+    result = create_customer(**request.model_dump())
+    if not result["ok"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/auth/signin")
+def signin(request: SignInRequest) -> dict:
+    result = authenticate(request.email, request.password)
+    if not result["ok"]:
+        raise HTTPException(status_code=401, detail=result["error"])
+    return result
+
+
+@app.get("/auth/demo-accounts")
+def demo_accounts() -> dict:
+    """Shown on the sign-in page so a reviewer can get in with one click."""
+    return {"accounts": list_demo_accounts()}
+
+
+@app.get("/me/shipments")
+def my_shipments(session_id: str) -> dict:
+    result = list_my_shipments(session_id)
+    if not result["ok"]:
+        raise HTTPException(status_code=401, detail=result["error"])
+    return result
+
+
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
     """One conversational turn.
@@ -42,6 +80,8 @@ def chat(request: ChatRequest) -> ChatResponse:
     The agent loop runs here; the UI stays a thin client that renders whatever
     this returns, including the selectable options and the live draft state.
     """
+    if request.customer_id is not None:
+        bind_session(request.session_id, request.customer_id)
     try:
         result = run_turn(request.session_id, request.message)
     except RuntimeError as exc:  # missing API key, misconfiguration
