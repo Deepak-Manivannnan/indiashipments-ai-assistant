@@ -19,6 +19,9 @@ class Settings(BaseSettings):
 
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
+    # "real" calls Gemini. "stub" replaces only the model with canned
+    # replies for testing; the tools and database stay real.
+    agent_mode: str = "real"
 
     pin_api_base_url: str = "https://api.postalpincode.in"
     pin_api_timeout_seconds: float = 3.0

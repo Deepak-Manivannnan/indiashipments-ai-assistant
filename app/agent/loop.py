@@ -245,6 +245,15 @@ def _options_from(calls: list[ToolCallRecord]) -> tuple[list[str], str | None]:
 def run_turn(session_id: str, message: str) -> dict:
     """Process one user message and return the structured reply."""
     settings = get_settings()
+
+    if settings.agent_mode.lower() == "stub":
+        logger.warning(
+            "AGENT_MODE=stub -- replies are canned and no model is being called"
+        )
+        from app.agent.stub import stub_turn
+
+        return stub_turn(session_id, message)
+
     client = get_client()
 
     history = load_history(session_id)
