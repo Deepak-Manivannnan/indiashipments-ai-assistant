@@ -193,6 +193,12 @@ CHAT_LAYOUT_CSS = """
       padding: .7rem .9rem; background: #fff;
   }}
 
+  /* Laying the frame out bottom-up keeps the newest message in view with no
+     scripting at all: a column-reverse flex container starts scrolled to its
+     own end. The children are emitted in reverse order to compensate. */
+  .st-key-isa-transcript [data-testid="stVerticalBlock"] {{
+      display: flex; flex-direction: column-reverse; justify-content: flex-start;
+  }}
   .st-key-isa-transcript [data-testid="stButton"] button {{
       font-size: .88rem; padding: .3rem .6rem; border-radius: 10px;
   }}
