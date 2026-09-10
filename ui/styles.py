@@ -177,36 +177,35 @@ def chip(status: str) -> str:
 
 CHAT_LAYOUT_CSS = """
 <style>
-  /* The assistant page is sized to fit the window, so the page itself has
-     nothing to scroll and only the transcript moves. The main container is
-     deliberately left scrollable: forcing overflow:hidden here once put the
-     composer out of reach entirely. */
+  /* The assistant page is sized to fit the window so that the page itself has
+     nothing to scroll and only the transcript moves. Everything above the
+     conversation is pulled tighter here than on the other pages, to buy the
+     height back for the transcript. The main container is deliberately left
+     scrollable: forcing overflow:hidden once put the composer out of reach. */
   section[data-testid="stMain"] .block-container {{
-      padding-top: 1.6rem !important;
-      padding-bottom: 0.4rem !important;
+      padding-top: 0.7rem !important;
+      padding-bottom: 0.3rem !important;
   }}
+  .is-navrule {{ margin: .35rem 0 .8rem 0 !important; }}
+  section[data-testid="stMain"] [data-testid="stVerticalBlock"] {{ gap: .5rem; }}
 
-  /* Everything above the transcript inside its column -- title row, banners --
-     plus the composer beneath it, comes to roughly 360px. */
   .st-key-isa-transcript {{
       height: calc(100vh - {offset}px) !important;
-      min-height: 220px;
+      min-height: 200px;
       border: 1px solid {border}; border-radius: 12px;
       padding: .7rem .9rem; background: #fff;
   }}
 
-  /* Sit the composer directly under the transcript rather than letting it
-     stretch across the window. */
-  div[data-testid="stChatInput"] {{ margin-top: .5rem; }}
+  div[data-testid="stChatInput"] {{ margin-top: .3rem; }}
+  div[data-testid="stChatInput"] textarea {{ font-size: .93rem; }}
 
   /* The new-chat icon, sitting beside the composer so it is always in view
      rather than scrolling away with the messages. */
   .st-key-isa-new-chat button {{
       font-size: 1.1rem; opacity: .5; transition: opacity .15s ease;
-      min-height: 2.6rem; margin-top: .5rem;
+      min-height: 2.6rem; margin-top: .3rem;
   }}
   .st-key-isa-new-chat button:hover {{ opacity: 1; }}
-  div[data-testid="stChatInput"] textarea {{ font-size: .93rem; }}
 </style>
 """
 
@@ -218,7 +217,7 @@ def _chat_layout_css(offset: int) -> str:
 # Space taken by everything else on the page. Banners and the upload control
 # appear conditionally, so the transcript gives up height to make room rather
 # than pushing the composer off the bottom of the window.
-BASE_CHAT_OFFSET = 420
+BASE_CHAT_OFFSET = 470
 BANNER_HEIGHT = 62
 UPLOADER_HEIGHT = 110
 OPTIONS_HEIGHT = 58
