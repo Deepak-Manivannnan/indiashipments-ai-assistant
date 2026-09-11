@@ -13,6 +13,7 @@ import uuid
 import streamlit as st
 from streamlit.components import v1 as st_components
 
+from app.rules import CONTENTS_CATEGORIES
 from ui import api, components, styles
 
 # Height of the scrolling transcript. Chosen so the composer and the panel's
@@ -81,14 +82,15 @@ def _greeting() -> None:
             "Create a new shipment",
         ]
     else:
-        # Nothing to offer a first-time customer but a conversation: a lone
-        # "Create a new shipment" button is just the greeting repeated as a
-        # widget.
+        # A first-time customer is asked what they are sending, so the
+        # categories belong here rather than several turns later. Answering the
+        # opening question with a tap is the shortest path into a booking, and
+        # free text still works for anything not on the list.
         greeting = (
             f"Hi {first_name}, how can I help today? Tell me what you'd like to "
             "send and I'll take it from there."
         )
-        options = []
+        options = CONTENTS_CATEGORIES
 
     st.session_state["messages"].append({"role": "assistant", "content": greeting})
     st.session_state["options"] = options

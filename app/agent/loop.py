@@ -403,7 +403,14 @@ def _build_state(session_id: str, reference: str | None) -> dict:
 FIELD_LANGUAGE = {
     "contents_category": (
         "contain", "inside", "sending", "what kind", "what are you", "items",
-        "parcel hold", "packing",
+        "parcel hold", "packing", "contents",
+        # How the opening question actually gets phrased. Without these the
+        # very first "what are you planning to send?" carried no buttons, and
+        # the same question came back later with them -- twice asked, once
+        # answerable.
+        "planning to send", "like to send", "want to send", "wish to send",
+        "you be sending", "you sending", "in the parcel", "in the package",
+        "in this package", "in this parcel", "what's in", "what is in",
     ),
     "service_type": (
         "service", "standard", "express", "how quickly", "how fast", "speed",
@@ -455,6 +462,16 @@ def _options_for(calls: list[ToolCallRecord], state: dict,
         # fixed choices. Showing the model's last list here would offer answers
         # to a question nobody asked.
         return [], None
+
+    # Nothing recorded yet, so there is no draft to say what comes next -- but
+    # the opening question is almost always "what are you sending?", and the
+    # categories belong under it the first time it is asked rather than the
+    # second. Still checked against the wording, so a different opening
+    # question does not collect somebody else's answers.
+    categories = tools.list_options("contents_category")
+    options = categories.get("options", []) if categories.get("ok") else []
+    if options and _fits_the_question("contents_category", reply, options):
+        return options, "contents_category"
 
     for call in reversed(calls):
         if call.name == "list_options" and call.ok:

@@ -372,3 +372,44 @@ def test_buttons_appear_when_the_wording_varies():
                      "Which delivery option suits you?"):
         options, _ = loop._options_for([], state, phrasing)
         assert options, phrasing
+
+
+# ---------------------------------------------------------------------------
+# The opening question carries its own choices
+#
+# "What are you planning to send?" arrived bare, because no draft existed yet
+# to say which field was next. The same question then came back several turns
+# later with the category buttons under it -- asked twice, answerable once.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("reply", [
+    "I'd be happy to help. To get started, could you tell me what you're "
+    "planning to send?",
+    "Great, I've used your saved details. What will you be sending in this "
+    "package?",
+    "Tell me what you'd like to send and I'll take it from there.",
+    "What's in the parcel?",
+])
+def test_the_opening_question_offers_the_categories(reply):
+    from app.agent.loop import _options_for
+
+    options, field = _options_for([], {"has_draft": False}, reply)
+
+    assert field == "contents_category"
+    assert "Medicines" in options
+
+
+@pytest.mark.parametrize("reply", [
+    "Hello! How can I help you today?",
+    "Who is the parcel going to?",
+    "What is the destination PIN code?",
+    "That's not something I can help with here, but I can book a parcel.",
+])
+def test_a_question_about_something_else_gets_no_categories(reply):
+    """Offering them here would collect an answer to a question nobody asked."""
+    from app.agent.loop import _options_for
+
+    options, field = _options_for([], {"has_draft": False}, reply)
+
+    assert options == []
+    assert field is None
