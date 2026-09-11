@@ -989,6 +989,48 @@ def _record_conditional_contents(session_id: str, description: str,
         return True
 
 
+def start_new_shipment(session_id: str) -> dict:
+    """Put the current draft aside and begin a fresh one.
+
+    "Create a new shipment" was only ever a sentence sent to the model, so the
+    draft already attached to the conversation stayed attached: a customer who
+    had just finished a parcel of medicines was told their prescription was
+    still on file and found the contents already filled in.
+
+    A booked shipment is never touched -- it is a real booking, and the pointer
+    to it is simply released. Only an unfinished draft is discarded, along with
+    the document requests that belonged to it.
+    """
+    with session_scope() as db:
+        state = _get_state(db, session_id)
+        discarded = None
+
+        if state.draft_shipment_id is not None:
+            shipment = db.get(Shipment, state.draft_shipment_id)
+            if shipment is not None and not shipment.reference:
+                discarded = _draft_as_dict(shipment)
+                for document in db.scalars(
+                    select(Document).where(Document.shipment_id == shipment.id)
+                ):
+                    db.delete(document)
+                db.delete(shipment)
+            state.draft_shipment_id = None
+
+        # The "somebody else is sending" flag lives inside the draft's own
+        # sender block, so it goes with the row.
+        return {
+            "ok": True,
+            "started_fresh": True,
+            "discarded_draft": discarded,
+            "note": (
+                "The previous draft has been cleared. Nothing is recorded for "
+                "this shipment yet -- no contents, no addresses, and no "
+                "documents. Do not carry anything over from the shipment "
+                "before it; ask for each detail again."
+            ),
+        }
+
+
 def check_contents(description: str, session_id: str | None = None) -> dict:
     """Screen a description of the contents against the acceptance rules.
 

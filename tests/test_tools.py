@@ -1141,3 +1141,53 @@ def test_nothing_is_stripped_when_no_buttons_are_shown():
     reply = "* Documents\n* Books"
 
     assert _strip_listed_options(reply, []) == reply
+
+
+# ---------------------------------------------------------------------------
+# Starting again has to actually start again
+#
+# "Create a new shipment" was only ever a sentence sent to the model, so the
+# draft already attached to the conversation stayed attached: a customer who
+# had just finished a parcel of medicines was greeted with "I have your
+# prescription on file" and a contents field already filled in.
+# ---------------------------------------------------------------------------
+
+def test_starting_a_new_shipment_discards_the_previous_draft(session_id):
+    fill_valid_draft(session_id, contents="medicines")
+    _attach_prescription(session_id)
+    assert tools.get_summary(session_id)["documents_received"] == ["prescription"]
+
+    result = tools.start_new_shipment(session_id)
+
+    assert result["ok"] is True
+    assert result["discarded_draft"]["contents"] == "medicines"
+    assert tools.get_summary(session_id)["ok"] is False   # nothing carried over
+
+
+def test_the_new_shipment_button_clears_the_draft_without_the_model(session_id):
+    """The label is ours, so the application acts on it rather than hoping."""
+    from app.agent.loop import _record_chosen_option
+
+    fill_valid_draft(session_id, contents="medicines")
+    _attach_prescription(session_id)
+
+    _record_chosen_option(session_id, "Create a new shipment")
+
+    assert tools.get_summary(session_id)["ok"] is False
+
+
+def test_starting_again_never_touches_a_booked_shipment(session_id):
+    fill_valid_draft(session_id)
+    tools.validate_shipment(session_id)
+    booking = tools.confirm_booking(session_id)
+
+    tools.start_new_shipment(session_id)
+
+    tracked = tools.get_tracking(booking["reference"])
+    assert tracked["ok"] is True
+    assert tracked["status"] == STATUS_BOOKED
+
+
+def test_starting_again_on_an_empty_conversation_is_harmless(session_id):
+    assert tools.start_new_shipment(session_id)["ok"] is True
+    assert tools.start_new_shipment(session_id)["discarded_draft"] is None

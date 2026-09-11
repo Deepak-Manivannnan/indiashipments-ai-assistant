@@ -491,6 +491,14 @@ def _record_chosen_option(session_id: str, message: str) -> None:
     answer = message.strip()
     lowered = answer.lower()
 
+    # Starting again has to actually start again. Left to the model, "Create a
+    # new shipment" was a sentence, and the finished parcel's contents and
+    # documents stayed attached to the conversation.
+    if lowered in {"create a new shipment", "start a new shipment",
+                   "new shipment", "book another shipment"}:
+        tools.start_new_shipment(session_id)
+        return
+
     if any(lowered == option.lower() for option in CONTENTS_CATEGORIES):
         if lowered != "other":  # "Other" says nothing about the contents
             tools.save_draft(session_id=session_id, contents=answer)

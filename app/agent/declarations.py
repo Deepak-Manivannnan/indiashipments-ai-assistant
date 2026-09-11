@@ -64,6 +64,17 @@ DECLARATIONS = [
         parameters=_schema(SAVE_DRAFT_PROPERTIES),
     ),
     types.FunctionDeclaration(
+        name="start_new_shipment",
+        description=(
+            "Clear the current draft and begin a fresh shipment. Call this the "
+            "moment the user wants to send something else -- 'a new shipment', "
+            "'another parcel', 'start over' -- so that nothing from the "
+            "previous parcel carries over. A shipment already booked is never "
+            "altered by this."
+        ),
+        parameters=_schema({}),
+    ),
+    types.FunctionDeclaration(
         name="check_contents",
         description=(
             "Screen what the user wants to send against the acceptance rules. "
@@ -242,6 +253,7 @@ DECLARATIONS = [
 SESSION_SCOPED = {
     "save_draft",
     "check_contents",
+    "start_new_shipment",
     "get_summary",
     "validate_shipment",
     "request_document",
@@ -260,6 +272,7 @@ CALLABLE_TOOLS = {
     "get_summary": tools.get_summary,
     "list_options": tools.list_options,
     "check_contents": tools.check_contents,
+    "start_new_shipment": tools.start_new_shipment,
     "resolve_address_conflict": tools.resolve_address_conflict,
     "prefill_sender_from_profile": tools.prefill_sender_from_profile,
     "prefill_sender_from_last_shipment": tools.prefill_sender_from_last_shipment,
