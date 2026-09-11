@@ -346,3 +346,29 @@ def test_the_order_follows_the_customer(signed_in_session):
     for already_given in ("contents", "service type", "value of the contents",
                           "package weight", "sender"):
         assert already_given not in (summary["ask_next"] or "")
+
+
+def test_buttons_are_withheld_when_they_do_not_answer_the_question():
+    """Regression: "Who is the recipient?" was shown with Standard/Express.
+
+    The draft says which field is next; the model does not always ask about
+    that field. Buttons under an unrelated question are worse than none,
+    because tapping one answers something nobody asked.
+    """
+    state = {"has_draft": True, "ask_next_options": "service_type"}
+
+    options, field = loop._options_for([], state, "Who is the recipient of this parcel?")
+    assert options == [] and field is None
+
+    options, field = loop._options_for([], state, "Which service would you like?")
+    assert options == ["Standard", "Express"] and field == "service_type"
+
+
+def test_buttons_appear_when_the_wording_varies():
+    """The model rephrases constantly, so matching cannot be literal."""
+    state = {"has_draft": True, "ask_next_options": "service_type"}
+    for phrasing in ("How quickly does it need to get there?",
+                     "Would you like Standard or Express?",
+                     "Which delivery option suits you?"):
+        options, _ = loop._options_for([], state, phrasing)
+        assert options, phrasing

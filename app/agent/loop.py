@@ -286,7 +286,37 @@ def _build_state(session_id: str, reference: str | None) -> dict:
     }
 
 
-def _options_for(calls: list[ToolCallRecord], state: dict) -> tuple[list[str], str | None]:
+# What a question about each fixed-choice field actually sounds like. The
+# draft says which field comes next, but the model does not always ask about
+# that field -- and buttons under an unrelated question are worse than no
+# buttons, because tapping one answers something nobody asked.
+FIELD_LANGUAGE = {
+    "contents_category": (
+        "contain", "inside", "sending", "what kind", "what are you", "items",
+        "parcel hold", "packing",
+    ),
+    "service_type": (
+        "service", "standard", "express", "how quickly", "how fast", "speed",
+        "delivery option",
+    ),
+    "insurance": ("acknowledge", "insur", "liability", "declared value is"),
+    "sender_address": ("saved", "sender", "collecting", "sending it", "from your"),
+    "sender_previous": ("last shipment", "previous", "sender", "collecting"),
+}
+
+
+def _fits_the_question(field: str | None, reply: str, options: list[str]) -> bool:
+    """Do these buttons answer the question that was actually asked?"""
+    if not field or not options:
+        return False
+    spoken = reply.lower()
+    if any(option.lower() in spoken for option in options):
+        return True
+    return any(phrase in spoken for phrase in FIELD_LANGUAGE.get(field, ()))
+
+
+def _options_for(calls: list[ToolCallRecord], state: dict,
+                 reply: str = "") -> tuple[list[str], str | None]:
     """The choices to show as buttons.
 
     Taken from the model's own `list_options` call when it made one, and
@@ -300,8 +330,15 @@ def _options_for(calls: list[ToolCallRecord], state: dict) -> tuple[list[str], s
     field = state.get("ask_next_options")
     if field:
         listed = tools.list_options(field)
-        if listed.get("ok"):
-            return listed.get("options", []), field
+        options = listed.get("options", []) if listed.get("ok") else []
+        if options and _fits_the_question(field, reply, options):
+            return options, field
+        if options:
+            logger.info(
+                "Not offering %s buttons: the reply asks about something else",
+                field,
+            )
+        return [], None
 
     if state.get("has_draft"):
         # The draft knows what is being asked, and it says this question has no
@@ -541,7 +578,7 @@ def run_turn(session_id: str, message: str) -> dict:
             db.close()
 
     state = _build_state(session_id, booked_reference)
-    options, expects = _options_for(executed, state)
+    options, expects = _options_for(executed, state, reply)
 
     return {
         "reply": reply,
