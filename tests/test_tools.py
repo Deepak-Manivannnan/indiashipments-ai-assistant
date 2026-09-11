@@ -974,3 +974,49 @@ def test_screening_after_a_booking_does_not_reopen_it(session_id):
     result = tools.check_contents("medicines", session_id=session_id)
 
     assert result["recorded_on_draft"] is False
+
+
+# ---------------------------------------------------------------------------
+# A document the agent asks for must be one the application is holding
+#
+# The model does not always screen the contents before asking -- resuming a
+# conversation where it already knows what is being sent, it asks straight out.
+# The upload control is drawn from the database, so without this the customer
+# is told to attach a prescription and given nothing to attach it with.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("reply", [
+    "please go ahead and provide the prescription so I can record it",
+    "Could you attach the prescription for the medicines?",
+    "Please upload the prescription when you can.",
+])
+def test_asking_for_a_prescription_puts_the_uploader_on_screen(session_id, reply):
+    from app.agent.loop import _honour_document_promise
+
+    _honour_document_promise(session_id, reply)
+
+    assert tools.get_summary(session_id)["pending_documents"] == ["prescription"]
+
+
+@pytest.mark.parametrize("reply", [
+    "Books do not need a prescription at all.",
+    "If you chose medicines, a prescription would be required.",
+    "What is the recipient's phone number?",
+])
+def test_merely_naming_a_document_promises_nothing(session_id, reply):
+    """Only a request creates a requirement; a mention is just an answer."""
+    from app.agent.loop import _honour_document_promise
+
+    _honour_document_promise(session_id, reply)
+
+    assert tools.get_summary(session_id).get("ok") is False   # no draft raised
+
+
+def test_the_promise_guard_leaves_an_unrelated_parcel_alone(session_id):
+    from app.agent.loop import _honour_document_promise
+
+    tools.save_draft(session_id, contents="books")
+    _honour_document_promise(session_id, "Please provide the prescription.")
+
+    assert tools.get_summary(session_id)["draft"]["contents"] == "books"
+    assert tools.get_summary(session_id)["pending_documents"] == []

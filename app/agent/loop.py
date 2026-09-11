@@ -252,6 +252,50 @@ def _quote(draft: dict) -> dict:
     return quote
 
 
+# The document a sentence can ask for, and the contents that require it. Only
+# rule-driven documents belong here: a prescription is required by medicines and
+# by nothing else, so the word in a request is enough to know what is being sent.
+DOCUMENT_PROMISES = {"prescription": "medicines"}
+
+# A reply only promises an upload if it actually asks for one. Merely naming a
+# document -- "books need no prescription" -- is not a request.
+ASKS_FOR_IT = ("attach", "upload", "provide", "share", "supply", "send me",
+               "send us", "give me")
+
+
+def _honour_document_promise(session_id: str, reply: str) -> None:
+    """Make sure a document the agent just asked for is one we are really holding.
+
+    The upload control is drawn from the pending documents in the database. A
+    model that asks for a prescription without having screened the contents --
+    resuming a conversation, say, where it already knows what is being sent --
+    leaves the customer looking for a control that was never put on screen, and
+    the honest-sounding explanation it reaches for next ("I cannot receive files
+    here") is simply untrue.
+
+    Screening through check_contents rather than writing the row directly keeps
+    every guard that tool has: a draft already holding different contents is
+    left alone, and a booked shipment is never reopened.
+    """
+    spoken = reply.lower()
+    if not any(phrase in spoken for phrase in ASKS_FOR_IT):
+        return
+
+    for doc_type, contents in DOCUMENT_PROMISES.items():
+        if doc_type not in spoken:
+            continue
+        summary = tools.get_summary(session_id)
+        if summary.get("ok") and summary.get("pending_documents"):
+            return  # already holding it
+        recorded = tools.check_contents(contents, session_id=session_id)
+        if recorded.get("recorded_on_draft"):
+            logger.info(
+                "Recorded '%s' for session %s: the reply asked for a %s that "
+                "nothing had raised.", contents, session_id, doc_type
+            )
+        return
+
+
 def _build_state(session_id: str, reference: str | None) -> dict:
     """The live draft panel's data, read straight from the database."""
     summary = tools.get_summary(session_id)
@@ -576,6 +620,8 @@ def run_turn(session_id: str, message: str) -> dict:
                 db.commit()
         finally:
             db.close()
+
+    _honour_document_promise(session_id, reply)
 
     state = _build_state(session_id, booked_reference)
     options, expects = _options_for(executed, state, reply)
