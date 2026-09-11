@@ -50,7 +50,7 @@ CSS = f"""
 
   /* --- brand + navigation --- */
   .ri-brand {{
-      font-size: 1.4rem; font-weight: 800; color: {BRAND};
+      font-size: 1.75rem; font-weight: 800; color: {BRAND};
       letter-spacing: -0.02em; line-height: 2.4rem;
   }}
   .ri-brand span {{ color: {ACCENT}; }}

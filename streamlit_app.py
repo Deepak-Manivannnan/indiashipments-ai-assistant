@@ -79,10 +79,13 @@ def _navigation() -> None:
                 st.rerun()
 
     with isa_slot:
+        # Tertiary, like the other nav items: a bordered box here sat oddly
+        # beside four borderless links. Ask RIA still fills in when it is the
+        # page you are on, which is how the current page is marked everywhere.
         if st.button(
             "✨ Ask RIA",
             use_container_width=True,
-            type="primary" if current == "ria" else "secondary",
+            type="primary" if current == "ria" else "tertiary",
         ):
             st.session_state["page"] = "ria"
             st.rerun()
@@ -90,7 +93,7 @@ def _navigation() -> None:
     with account_slot:
         if customer:
             with st.popover(f"👤 {customer['name'].split()[0]}",
-                            use_container_width=True):
+                            use_container_width=True, type="tertiary"):
                 st.markdown(f"**Signed in as {customer['name']}**")
                 st.caption(customer["email"])
                 if st.button("Sign out", use_container_width=True):
@@ -100,7 +103,7 @@ def _navigation() -> None:
                     st.query_params.clear()
                     st.session_state["page"] = "home"
                     st.rerun()
-        elif st.button("Sign in", use_container_width=True, type="secondary"):
+        elif st.button("Sign in", use_container_width=True, type="tertiary"):
             st.session_state["page"] = "signin"
             st.rerun()
 
