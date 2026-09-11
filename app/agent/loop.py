@@ -526,7 +526,7 @@ def _acceptance_note(message: str) -> str:
     decision = tools.check_contents(message)
     reasons = " ".join(decision.get("reasons") or []) or "No condition applies."
     return (
-        "\n\n[IndiaShipments acceptance check on the message above -- verdict: "
+        "\n\n[Rapid India acceptance check on the message above -- verdict: "
         f"{decision['decision']}. {reasons} Answer using this verdict and these "
         "words only. Do not contradict it or add rules of your own.]"
     )

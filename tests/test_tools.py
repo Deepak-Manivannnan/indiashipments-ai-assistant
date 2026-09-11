@@ -43,7 +43,7 @@ VALID_PACKAGE = {
 }
 
 
-SEEDED_REFERENCES = {"IS-1001", "IS-1042", "IS-1077"}
+SEEDED_REFERENCES = {"RI-1001", "RI-1042", "RI-1077"}
 
 
 DEMO_EMAIL = "rahul@example.com"
@@ -213,7 +213,7 @@ def test_the_medicines_journey_end_to_end(session_id):
     )
     booking = tools.confirm_booking(session_id)
     assert booking["ok"] is True
-    assert booking["reference"].startswith("IS-")
+    assert booking["reference"].startswith("RI-")
 
 
 def test_high_value_shipment_needs_explicit_insurance_acknowledgement(session_id):
@@ -284,7 +284,7 @@ def test_full_booking_journey_persists_a_real_shipment(session_id):
     booking = tools.confirm_booking(session_id)
     assert booking["ok"] is True
     reference = booking["reference"]
-    assert reference.startswith("IS-")
+    assert reference.startswith("RI-")
 
     # It is in the database, not just in the response.
     db = SessionLocal()
@@ -327,13 +327,13 @@ def test_save_draft_merges_across_turns_and_never_erases(session_id):
 # ---------------------------------------------------------------------------
 
 def test_tracking_an_unknown_reference_fails_clearly():
-    result = tools.get_tracking("IS-9999")
+    result = tools.get_tracking("RI-9999")
     assert result["ok"] is False
-    assert "IS-9999" in result["error"]
+    assert "RI-9999" in result["error"]
 
 
 def test_tracking_a_seeded_shipment_returns_its_real_events():
-    result = tools.get_tracking("IS-1077")
+    result = tools.get_tracking("RI-1077")
     assert result["ok"] is True
     assert result["status"] == "Delivery failed"
     assert len(result["events"]) == 7
@@ -541,7 +541,7 @@ def test_customers_only_see_their_own_shipments(session_id):
     result = tools.list_my_shipments(session_id)
     assert result["ok"] is True
     references = [s["reference"] for s in result["shipments"]]
-    assert references == ["IS-1077"]  # not IS-1001 or IS-1042
+    assert references == ["RI-1077"]  # not RI-1001 or RI-1042
 
 
 # ---------------------------------------------------------------------------

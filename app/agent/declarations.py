@@ -212,7 +212,7 @@ DECLARATIONS = [
     types.FunctionDeclaration(
         name="estimate_price",
         description=(
-            "Estimate the shipping charge. This is an IndiaShipments estimate "
+            "Estimate the shipping charge. This is a Rapid India estimate "
             "from this application, not a carrier quote, and must be described "
             "that way to the user."
         ),
@@ -242,7 +242,7 @@ DECLARATIONS = [
             "tracking events. Describe only what this returns."
         ),
         parameters=_schema(
-            {"reference": (STR, "Shipment reference, for example IS-1042.")},
+            {"reference": (STR, "Shipment reference, for example RI-1042.")},
             required=["reference"],
         ),
     ),

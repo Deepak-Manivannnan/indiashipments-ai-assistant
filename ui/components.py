@@ -26,7 +26,7 @@ def timeline(events: list[dict], status: str) -> None:
     """
     if not events:
         st.markdown(
-            '<p class="is-muted">No tracking events have been recorded yet.</p>',
+            '<p class="ri-muted">No tracking events have been recorded yet.</p>',
             unsafe_allow_html=True,
         )
         return
@@ -34,36 +34,36 @@ def timeline(events: list[dict], status: str) -> None:
     rows = []
     for index, event in enumerate(events):
         is_last = index == len(events) - 1
-        css = "is-event"
+        css = "ri-event"
         if is_last:
             css += " problem" if event["status"] in PROBLEM_STATUSES else " current"
         rows.append(
-            f'<div class="{css}"><div class="is-dot"></div>'
-            f'<div class="is-event-title">{event["status"]}</div>'
-            f'<div class="is-event-meta">{_format_time(event.get("event_time"))}'
+            f'<div class="{css}"><div class="ri-dot"></div>'
+            f'<div class="ri-event-title">{event["status"]}</div>'
+            f'<div class="ri-event-meta">{_format_time(event.get("event_time"))}'
             + (f' &middot; {event["location"]}' if event.get("location") else "")
             + "</div>"
             + (
-                f'<div class="is-event-note">{event["note"]}</div>'
+                f'<div class="ri-event-note">{event["note"]}</div>'
                 if event.get("note")
                 else ""
             )
             + "</div>"
         )
     st.markdown(
-        f'<div class="is-timeline">{"".join(rows)}</div>', unsafe_allow_html=True
+        f'<div class="ri-timeline">{"".join(rows)}</div>', unsafe_allow_html=True
     )
 
 
 def _row(label: str, value) -> str:
     if value in (None, "", []):
         return (
-            f'<div class="is-row"><span class="is-key">{label}</span>'
-            f'<span class="is-val missing">not given yet</span></div>'
+            f'<div class="ri-row"><span class="ri-key">{label}</span>'
+            f'<span class="ri-val missing">not given yet</span></div>'
         )
     return (
-        f'<div class="is-row"><span class="is-key">{label}</span>'
-        f'<span class="is-val">{value}</span></div>'
+        f'<div class="ri-row"><span class="ri-key">{label}</span>'
+        f'<span class="ri-val">{value}</span></div>'
     )
 
 
@@ -83,8 +83,8 @@ def draft_panel(state: dict) -> None:
     """
     if not state.get("has_draft"):
         st.markdown(
-            '<div class="is-panel"><h4>This shipment</h4>'
-            '<p class="is-muted">Nothing yet. Tell ISA what you would like to '
+            '<div class="ri-panel"><h4>This shipment</h4>'
+            '<p class="ri-muted">Nothing yet. Tell RIA what you would like to '
             "send and the details will appear here as you go.</p></div>",
             unsafe_allow_html=True,
         )
@@ -128,14 +128,14 @@ def draft_panel(state: dict) -> None:
         )
 
     note = (
-        '<p class="is-muted" style="margin:.6rem 0 0 0;font-size:.78rem">'
-        "Estimated by IndiaShipments from distance and weight. Not a carrier "
+        '<p class="ri-muted" style="margin:.6rem 0 0 0;font-size:.78rem">'
+        "Estimated by Rapid India from distance and weight. Not a carrier "
         "quote.</p>"
         if price
         else ""
     )
     st.markdown(
-        f'<div class="is-panel"><h4>This shipment</h4>{"".join(rows)}{note}</div>',
+        f'<div class="ri-panel"><h4>This shipment</h4>{"".join(rows)}{note}</div>',
         unsafe_allow_html=True,
     )
 
@@ -148,8 +148,8 @@ def shipment_card(shipment: dict, *, expandable: bool = True) -> None:
         left, right = st.columns([3, 1])
         with left:
             st.markdown(
-                f'<span class="is-ref">{reference}</span>'
-                f'<span class="is-muted"> &middot; to '
+                f'<span class="ri-ref">{reference}</span>'
+                f'<span class="ri-muted"> &middot; to '
                 f'{shipment.get("to_city") or "unknown"}'
                 f' &middot; {shipment.get("contents") or ""}</span>',
                 unsafe_allow_html=True,
@@ -165,7 +165,7 @@ def shipment_card(shipment: dict, *, expandable: bool = True) -> None:
         if not ok:
             st.error(payload.get("detail", "Tracking is unavailable."))
             return
-        st.markdown(f'<p class="is-muted">{payload["explanation"]}</p>',
+        st.markdown(f'<p class="ri-muted">{payload["explanation"]}</p>',
                     unsafe_allow_html=True)
         timeline(payload["events"], payload["status"])
 

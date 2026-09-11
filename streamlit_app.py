@@ -1,4 +1,4 @@
-"""IndiaShipments -- web application entry point.
+"""Rapid India -- web application entry point.
 
 Run the backend first:
     uvicorn app.main:app --port 8000
@@ -25,10 +25,10 @@ except Exception:
     pass  # no secrets file locally, which is fine
 
 from ui import api, styles  # noqa: E402
-from ui.views import auth, isa, pages  # noqa: E402
+from ui.views import auth, pages, ria  # noqa: E402
 
 st.set_page_config(
-    page_title="IndiaShipments",
+    page_title="Rapid India",
     page_icon="📦",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -39,12 +39,12 @@ PAGES = {
     "services": ("Services", pages.services),
     "orders": ("My Orders", pages.orders),
     "about": ("About", pages.about),
-    "isa": ("Ask ISA", isa.render),
+    "ria": ("Ask RIA", ria.render),
     "signin": ("Sign in", auth.render),
 }
 
 # Pages that touch a shipment need an account, so a booking always has an owner.
-PRIVATE = {"orders", "isa"}
+PRIVATE = {"orders", "ria"}
 
 
 def _navigation() -> None:
@@ -63,7 +63,7 @@ def _navigation() -> None:
 
     with brand:
         st.markdown(
-            '<div class="is-brand">India<span>Shipments</span></div>',
+            '<div class="ri-brand">Rapid<span>India</span></div>',
             unsafe_allow_html=True,
         )
 
@@ -80,11 +80,11 @@ def _navigation() -> None:
 
     with isa_slot:
         if st.button(
-            "✨ Ask ISA",
+            "✨ Ask RIA",
             use_container_width=True,
-            type="primary" if current == "isa" else "secondary",
+            type="primary" if current == "ria" else "secondary",
         ):
-            st.session_state["page"] = "isa"
+            st.session_state["page"] = "ria"
             st.rerun()
 
     with account_slot:
@@ -104,7 +104,7 @@ def _navigation() -> None:
             st.session_state["page"] = "signin"
             st.rerun()
 
-    st.markdown('<div class="is-navrule"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="ri-navrule"></div>', unsafe_allow_html=True)
 
 
 def _restore_session() -> None:

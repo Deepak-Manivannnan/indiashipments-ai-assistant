@@ -1,4 +1,4 @@
-"""Ask ISA -- the conversational booking and tracking assistant.
+"""Ask RIA -- the conversational booking and tracking assistant.
 
 Laid out as a chat widget rather than a document: the frame is a fixed height
 so the page itself does not scroll, and only the transcript moves. On the right
@@ -115,9 +115,9 @@ def _bubbles() -> list[str]:
     rendered = []
     for message in st.session_state["messages"]:
         side = "user" if message["role"] == "user" else "bot"
-        css = "is-bubble error" if message.get("error") else "is-bubble"
+        css = "ri-bubble error" if message.get("error") else "ri-bubble"
         rendered.append(
-            f'<div class="is-msg {side}">'
+            f'<div class="ri-msg {side}">'
             f'<div class="{css}">{_as_bubble_html(message["content"])}</div>'
             "</div>"
         )
@@ -125,8 +125,8 @@ def _bubbles() -> list[str]:
 
 
 TYPING_BUBBLE = (
-    '<div class="is-msg bot"><div class="is-bubble is-typing">'
-    "ISA is typing<span>.</span><span>.</span><span>.</span></div></div>"
+    '<div class="ri-msg bot"><div class="ri-bubble ri-typing">'
+    "RIA is typing<span>.</span><span>.</span><span>.</span></div></div>"
 )
 
 
@@ -142,7 +142,7 @@ def _transcript() -> tuple[str | None, object, object]:
     """
     bubbles = _bubbles()
 
-    with st.container(height=CHAT_HEIGHT, border=False, key="isa-transcript"):
+    with st.container(height=CHAT_HEIGHT, border=False, key="ria-transcript"):
         body = st.empty()
         _paint(body, bubbles)
         choices = st.empty()
@@ -165,7 +165,7 @@ def _scroll_to_latest() -> None:
         <script>
           const pin = () => {
             const box = window.parent.document.querySelector(
-              '.st-key-isa-transcript'
+              '.st-key-ria-transcript'
             );
             if (box) { box.scrollTop = box.scrollHeight; }
           };
@@ -248,7 +248,7 @@ def _panel(state: dict) -> None:
 
     if state.get("ready_to_book"):
         st.markdown(
-            '<div class="is-banner ready" style="margin-top:.8rem">Everything '
+            '<div class="ri-banner ready" style="margin-top:.8rem">Everything '
             "checks out. Review the details above, then confirm.</div>",
             unsafe_allow_html=True,
         )
@@ -261,14 +261,14 @@ def _panel(state: dict) -> None:
         missing = state.get("still_missing") or []
         if missing:
             st.markdown(
-                f'<p class="is-muted" style="margin-top:.7rem">'
+                f'<p class="ri-muted" style="margin-top:.7rem">'
                 f"{len(missing)} detail{'s' if len(missing) > 1 else ''} still "
                 "needed before this can be booked.</p>",
                 unsafe_allow_html=True,
             )
         elif state.get("blockers"):
             st.markdown(
-                '<p class="is-muted" style="margin-top:.7rem">All the details are '
+                '<p class="ri-muted" style="margin-top:.7rem">All the details are '
                 "in. Clear the item above and the booking can go ahead.</p>",
                 unsafe_allow_html=True,
             )
@@ -278,7 +278,7 @@ def render() -> None:
     styles.inject()
     _ensure_session()
 
-    if not components.require_sign_in("use ISA"):
+    if not components.require_sign_in("use RIA"):
         return
 
     _greeting()
@@ -308,7 +308,7 @@ def render() -> None:
                 help="New chat",
                 type="tertiary",
                 use_container_width=True,
-                key="isa-new-chat",
+                key="ria-new-chat",
             ):
                 _reset()
                 st.rerun()

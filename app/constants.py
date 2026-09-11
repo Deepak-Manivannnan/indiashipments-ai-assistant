@@ -46,4 +46,4 @@ DOC_STATUSES = [DOC_PENDING, DOC_ACCEPTED, DOC_REJECTED]
 
 # Reference format for shipments created by this application.
 # Deliberately NOT presented to the user as a carrier AWB.
-REFERENCE_PREFIX = "IS-"
+REFERENCE_PREFIX = "RI-"

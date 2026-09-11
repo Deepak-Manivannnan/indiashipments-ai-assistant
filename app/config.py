@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     mysql_port: int = 3306
     mysql_user: str = "root"
     mysql_password: str = ""
-    mysql_database: str = "indiashipments"
+    mysql_database: str = "rapidindia"
     # Hosted MySQL requires TLS; a local server generally does not.
     mysql_ssl: bool = False
     mysql_ssl_ca: str = ""

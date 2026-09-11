@@ -43,9 +43,9 @@ from app.tools import (
 UPLOAD_DIR = Path("uploads")
 
 app = FastAPI(
-    title="IndiaShipments Agent API",
+    title="Rapid India Agent API",
     version="0.1.0",
-    description="Backend for the IndiaShipments conversational shipment agent.",
+    description="Backend for the Rapid India conversational shipment agent.",
 )
 
 

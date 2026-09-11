@@ -6,9 +6,9 @@ Re-running replaces the seeded shipments (matched by reference) so the demo
 data stays predictable. Shipments booked through the agent are left alone.
 
 Scenarios:
-  IS-1001  Delivered            -- full, clean event history
-  IS-1042  Out for delivery     -- in progress (the brief's own example ref)
-  IS-1077  Delivery failed      -- the problem case, with a delay before it
+  RI-1001  Delivered            -- full, clean event history
+  RI-1042  Out for delivery     -- in progress
+  RI-1077  Delivery failed      -- the problem case, with a delay before it
 """
 
 from datetime import datetime, timedelta, timezone
@@ -43,7 +43,7 @@ DEMO_CUSTOMERS = [
         "city": "Kochi",
         "state": "Kerala",
         "pin": "682031",
-        "owns": "IS-1001",
+        "owns": "RI-1001",
         "shows": "a delivered shipment",
     },
     {
@@ -54,7 +54,7 @@ DEMO_CUSTOMERS = [
         "city": "Chennai",
         "state": "Tamil Nadu",
         "pin": "600002",
-        "owns": "IS-1042",
+        "owns": "RI-1042",
         "shows": "a shipment out for delivery",
     },
     {
@@ -65,7 +65,7 @@ DEMO_CUSTOMERS = [
         "city": "Mumbai",
         "state": "Maharashtra",
         "pin": "400050",
-        "owns": "IS-1077",
+        "owns": "RI-1077",
         "shows": "a failed delivery",
     },
 ]
@@ -97,7 +97,7 @@ def package(weight_g, length_mm, width_mm, height_mm):
 
 SEEDS = [
     {
-        "reference": "IS-1001",
+        "reference": "RI-1001",
         "status": STATUS_DELIVERED,
         "sender_json": person(
             "Rahul Menon", "9847012345", "12 Marine Drive", "Kochi", "Kerala", "682031"
@@ -119,7 +119,7 @@ SEEDS = [
         ],
     },
     {
-        "reference": "IS-1042",
+        "reference": "RI-1042",
         "status": STATUS_OUT_FOR_DELIVERY,
         "sender_json": person(
             "Priya Raghavan", "9840055667", "8 Anna Salai", "Chennai", "Tamil Nadu", "600002"
@@ -140,7 +140,7 @@ SEEDS = [
         ],
     },
     {
-        "reference": "IS-1077",
+        "reference": "RI-1077",
         "status": STATUS_DELIVERY_FAILED,
         "sender_json": person(
             "Imran Shaikh", "9820011223", "5 Linking Road", "Mumbai", "Maharashtra", "400050"

@@ -1399,7 +1399,7 @@ def estimate_price(
 ) -> dict:
     """Estimate the shipping charge using this application's own formula.
 
-    Always presented as an estimate produced by IndiaShipments, never as a
+    Always presented as an estimate produced by Rapid India, never as a
     carrier quote.
     """
     if service_type not in PRICE_TABLE:
@@ -1440,7 +1440,7 @@ def estimate_price(
             "distance_inr": distance_component,
         },
         "disclaimer": (
-            "This is an IndiaShipments estimate calculated by this application, "
+            "This is a Rapid India estimate calculated by this application, "
             "not a carrier quote."
         ),
     }
@@ -1527,7 +1527,7 @@ def confirm_booking(session_id: str) -> dict:
             "reference": shipment.reference,
             "status": shipment.status,
             "note": (
-                "Shipment booked and stored. This is an IndiaShipments tracking "
+                "Shipment booked and stored. This is a Rapid India tracking "
                 "reference, not a carrier air waybill."
             ),
         }

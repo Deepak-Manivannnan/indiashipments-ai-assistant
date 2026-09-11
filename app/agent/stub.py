@@ -416,7 +416,7 @@ def _ask_next(session_id: str, calls: list, prefix: str, allow_confirm) -> dict:
             reset_session(session_id)
             return _respond(
                 session_id,
-                "All booked. Your IndiaShipments tracking reference is "
+                "All booked. Your Rapid India tracking reference is "
                 f"{result['reference']}.",
                 [], None, calls, result["reference"],
             )

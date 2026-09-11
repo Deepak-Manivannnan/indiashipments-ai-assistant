@@ -180,13 +180,13 @@ def test_a_tool_that_explodes_is_reported_not_hidden(signed_in_session, monkeypa
 # ---------------------------------------------------------------------------
 
 def test_an_unknown_reference_is_not_dressed_up():
-    result = tools.get_tracking("IS-9999")
+    result = tools.get_tracking("RI-9999")
     assert result["ok"] is False
     assert "check the reference" in result["error"]
 
 
 def test_a_failed_delivery_is_reported_as_a_failure():
-    result = tools.get_tracking("IS-1077")
+    result = tools.get_tracking("RI-1077")
 
     assert result["status"] == "Delivery failed"
     assert "Delivery failed" in result["explanation"]
@@ -197,7 +197,7 @@ def test_a_failed_delivery_is_reported_as_a_failure():
 
 def test_tracking_never_offers_a_delivery_date():
     """Nothing in a tracking response may imply a future date."""
-    for reference in ("IS-1001", "IS-1042", "IS-1077"):
+    for reference in ("RI-1001", "RI-1042", "RI-1077"):
         explanation = tools.get_tracking(reference)["explanation"].lower()
         for phrase in ("will arrive", "expected by", "due on", "estimated delivery",
                        "should arrive"):
@@ -205,7 +205,7 @@ def test_tracking_never_offers_a_delivery_date():
 
 
 def test_a_delivered_shipment_reads_as_finished():
-    result = tools.get_tracking("IS-1001")
+    result = tools.get_tracking("RI-1001")
     assert result["status"] == "Delivered"
     assert result["events"][-1]["status"] == "Delivered"
 

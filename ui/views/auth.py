@@ -19,13 +19,13 @@ def _sign_in_as(customer: dict) -> None:
     for key in ("session_id", "messages", "state", "options", "greeted"):
         st.session_state.pop(key, None)
 
-    # The conversation is created and bound now rather than when ISA is first
+    # The conversation is created and bound now rather than when RIA is first
     # opened, so its id can go into the URL and survive a page refresh.
     session_id = f"ui-{uuid.uuid4().hex[:16]}"
     if api.bind_session(session_id, customer["id"]):
         st.session_state["session_id"] = session_id
         st.query_params["sid"] = session_id
-    # Land on the home page, like any other site. ISA opens only when the
+    # Land on the home page, like any other site. RIA opens only when the
     # user chooses to open it.
     st.session_state["page"] = "home"
     st.rerun()
@@ -48,7 +48,7 @@ def _sign_in_form() -> None:
 
 def _sign_up_form() -> None:
     st.markdown(
-        '<p class="is-muted">Your address is optional, but if you add it ISA '
+        '<p class="ri-muted">Your address is optional, but if you add it RIA '
         "will fill in the sender details for you instead of asking.</p>",
         unsafe_allow_html=True,
     )
@@ -91,9 +91,9 @@ def render() -> None:
     # Centred, so the form is not stranded against the left edge of a wide page.
     _, middle, _ = st.columns([1, 1.6, 1])
     with middle:
-        st.markdown("## Sign in to IndiaShipments")
+        st.markdown("## Sign in to Rapid India")
         st.markdown(
-            '<p class="is-muted">Shipments are tied to an account, so we know '
+            '<p class="ri-muted">Shipments are tied to an account, so we know '
             "who is sending the parcel and can keep your orders together.</p>",
             unsafe_allow_html=True,
         )

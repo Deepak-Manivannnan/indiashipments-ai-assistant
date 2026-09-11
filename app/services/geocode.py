@@ -23,7 +23,7 @@ NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 
 # Nominatim's usage policy requires an identifying User-Agent; requests without
 # one are rejected.
-USER_AGENT = "IndiaShipments-Agent/0.1 (interview challenge project)"
+USER_AGENT = "RapidIndia-Agent/0.1 (interview challenge project)"
 REQUEST_TIMEOUT_SECONDS = 6.0
 MIN_SECONDS_BETWEEN_REQUESTS = 1.1  # policy: max 1 request per second
 

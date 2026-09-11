@@ -35,7 +35,7 @@ def _request(method: str, path: str, **kwargs) -> tuple[bool, dict]:
         )
     except requests.RequestException as exc:
         raise BackendUnavailable(
-            f"Could not reach the IndiaShipments API at {BASE_URL}. "
+            f"Could not reach the Rapid India API at {BASE_URL}. "
             "Is the backend running?"
         ) from exc
 

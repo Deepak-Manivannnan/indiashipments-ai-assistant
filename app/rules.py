@@ -47,7 +47,7 @@ CONTENTS_CATEGORIES = [
 BLOCKED_CONTENTS = [
     (
         ["currency", "cash", "coins", "banknote", "bank note", "rupee note"],
-        "Currency, cash and coins cannot be sent through IndiaShipments.",
+        "Currency, cash and coins cannot be sent through Rapid India.",
     ),
     (
         # "cracker" alone is deliberately absent: in Indian English it is as
@@ -516,7 +516,7 @@ def validate_draft(draft: dict) -> ValidationResult:
         result.requires_insurance_ack = True
         result.warnings.append(
             f"The declared value is above Rs {HIGH_VALUE_THRESHOLD_INR:,}. "
-            "IndiaShipments liability is limited unless the parcel is insured -- "
+            "Rapid India liability is limited unless the parcel is insured -- "
             "you will need to acknowledge this before booking."
         )
 

@@ -13,7 +13,7 @@ from ui import api, components, styles
 
 
 def _card(title: str, body: str) -> str:
-    return f'<div class="is-card"><h4>{title}</h4><p>{body}</p></div>'
+    return f'<div class="ri-card"><h4>{title}</h4><p>{body}</p></div>'
 
 
 def _card_row(cards: list[tuple[str, str]]) -> None:
@@ -43,7 +43,7 @@ def home() -> None:
         first_name = customer["name"].split()[0]
         st.markdown(
             f"""
-            <div class="is-hero">
+            <div class="ri-hero">
               <h1>Hi {first_name}</h1>
               <p>Your parcels, moving across India. Book a collection, follow a
               delivery, or pick up where you left off.</p>
@@ -54,9 +54,9 @@ def home() -> None:
     else:
         st.markdown(
             """
-            <div class="is-hero">
+            <div class="ri-hero">
               <h1>Parcel delivery across India</h1>
-              <p>IndiaShipments moves parcels between every serviceable PIN code
+              <p>Rapid India moves parcels between every serviceable PIN code
               in the country, with Standard and Express options, verified
               addresses and tracking from collection to doorstep.</p>
             </div>
@@ -91,7 +91,7 @@ def home() -> None:
 
     st.write("")
     st.caption(
-        "Prefer to talk it through? ISA, our booking assistant, can take the "
+        "Prefer to talk it through? RIA, our booking assistant, can take the "
         "details in conversation and book the parcel for you."
     )
 
@@ -105,7 +105,7 @@ def services() -> None:
 
     st.markdown("## Services")
     st.markdown(
-        '<p class="is-muted">Domestic shipments within India. These are the '
+        '<p class="ri-muted">Domestic shipments within India. These are the '
         "conditions we apply, and we apply them the same way every time.</p>",
         unsafe_allow_html=True,
     )
@@ -120,7 +120,7 @@ def services() -> None:
     st.write("")
     st.markdown("### What you can send")
     st.markdown(
-        '<p class="is-muted">' + " &middot; ".join(CONTENTS_CATEGORIES) + "</p>",
+        '<p class="ri-muted">' + " &middot; ".join(CONTENTS_CATEGORIES) + "</p>",
         unsafe_allow_html=True,
     )
 
@@ -184,7 +184,7 @@ def orders() -> None:
     shipments = api.my_shipments(session_id)
     if shipments:
         st.markdown(
-            f'<p class="is-muted">{len(shipments)} shipment'
+            f'<p class="ri-muted">{len(shipments)} shipment'
             f'{"s" if len(shipments) > 1 else ""}.</p>',
             unsafe_allow_html=True,
         )
@@ -193,21 +193,21 @@ def orders() -> None:
             st.write("")
     else:
         st.markdown(
-            '<p class="is-muted">You have no shipments yet.</p>',
+            '<p class="ri-muted">You have no shipments yet.</p>',
             unsafe_allow_html=True,
         )
         if st.button("Book your first parcel", type="primary"):
-            st.session_state["page"] = "isa"
+            st.session_state["page"] = "ria"
             st.rerun()
 
     st.divider()
     st.markdown("#### Track any reference")
     st.markdown(
-        '<p class="is-muted">Looking for a parcel someone else sent you? Enter '
+        '<p class="ri-muted">Looking for a parcel someone else sent you? Enter '
         "its reference here.</p>",
         unsafe_allow_html=True,
     )
-    reference = st.text_input("Shipment reference", placeholder="IS-1042",
+    reference = st.text_input("Shipment reference", placeholder="RI-1042",
                               label_visibility="collapsed")
     if not reference:
         return
@@ -219,11 +219,11 @@ def orders() -> None:
 
     left, right = st.columns([2, 1])
     with left:
-        st.markdown(f'<span class="is-ref">{payload["reference"]}</span>',
+        st.markdown(f'<span class="ri-ref">{payload["reference"]}</span>',
                     unsafe_allow_html=True)
     with right:
         st.markdown(styles.chip(payload["status"]), unsafe_allow_html=True)
-    st.markdown(f'<p class="is-muted">{payload["explanation"]}</p>',
+    st.markdown(f'<p class="ri-muted">{payload["explanation"]}</p>',
                 unsafe_allow_html=True)
     st.write("")
     components.timeline(payload["events"], payload["status"])
@@ -236,9 +236,9 @@ def orders() -> None:
 def about() -> None:
     styles.inject()
 
-    st.markdown("## About IndiaShipments")
+    st.markdown("## About Rapid India")
     st.markdown(
-        "IndiaShipments is a domestic parcel carrier. We collect from the "
+        "Rapid India is a domestic parcel carrier. We collect from the "
         "sender's door and deliver anywhere in India that the postal network "
         "reaches, handling everything from documents and clothing to fragile "
         "goods and perishables."
@@ -274,9 +274,9 @@ def about() -> None:
         "you pay."
     )
 
-    st.markdown("### Booking with ISA")
+    st.markdown("### Booking with RIA")
     st.markdown(
-        "ISA is our booking assistant. It takes the details in conversation "
+        "RIA is our booking assistant. It takes the details in conversation "
         "rather than as a form, applies the same published conditions as any "
         "other booking, and shows you the full shipment for review before "
         "anything is confirmed."
@@ -284,8 +284,8 @@ def about() -> None:
 
     st.markdown("### Notes on this build")
     st.caption(
-        "This application was built for the IndiaShipments AI Shipment Agent "
-        "Challenge. Tracking references are generated by this application and "
+        "This application was built as an AI shipment agent challenge "
+        "project. Tracking references are generated by this application and "
         "are not carrier air waybills; prices are this application's own "
         "estimate rather than a carrier quote; and document review is "
         "simulated, so an uploaded file is recorded as received but never "
