@@ -13,7 +13,6 @@ import uuid
 import streamlit as st
 from streamlit.components import v1 as st_components
 
-from app.rules import CONTENTS_CATEGORIES
 from ui import api, components, styles
 
 # Height of the scrolling transcript. Chosen so the composer and the panel's
@@ -70,27 +69,37 @@ def _greeting() -> None:
     shipments = api.my_shipments(st.session_state["session_id"])
 
     first_name = (customer.get("name") or "there").split()[0]
+
+    # Every conversation opens by saying who is answering and what they can do.
+    # Someone arriving at a chat window should not have to guess either.
+    introduction = (
+        f"Hi {first_name}, I'm RIA, the Rapid India booking assistant -- I can "
+        "book a parcel for you, or tell you where one you have already sent has "
+        "got to."
+    )
+
     if shipments:
         latest = shipments[0]
         greeting = (
-            f"Hi {first_name}, how can I help today? I can start a new "
-            f"shipment, or check on {latest['reference']}, which is currently "
-            f"{latest['status'].lower()}."
+            f"{introduction} Your most recent shipment, {latest['reference']}, "
+            f"is currently {latest['status'].lower()}."
         )
         options = [
             f"Track {latest['reference']} ({latest['status']})",
             "Create a new shipment",
         ]
     else:
-        # A first-time customer is asked what they are sending, so the
-        # categories belong here rather than several turns later. Answering the
-        # opening question with a tap is the shortest path into a booking, and
-        # free text still works for anything not on the list.
-        greeting = (
-            f"Hi {first_name}, how can I help today? Tell me what you'd like to "
-            "send and I'll take it from there."
-        )
-        options = CONTENTS_CATEGORIES
+        # No buttons here. Nine contents categories under the greeting answer a
+        # question nobody has asked yet, and they turned the opening into a form
+        # rather than a conversation.
+        #
+        # And the opener stays general rather than "what would you like to
+        # send?": asking that here, where there is no draft to hang the choices
+        # on, only to ask it again a turn later with the buttons attached, is
+        # the same question twice. RIA asks it once, when it can be answered
+        # with a tap.
+        greeting = f"{introduction} How can I help today?"
+        options = []
 
     st.session_state["messages"].append({"role": "assistant", "content": greeting})
     st.session_state["options"] = options
