@@ -252,15 +252,76 @@ def _quote(draft: dict) -> dict:
     return quote
 
 
+# A line that is nothing but one of the choices, with or without a bullet or a
+# number in front of it.
+_LISTED_CHOICE = re.compile(r"^\s*(?:[-*•+]|\d+[.)])?\s*(.+?)\s*$")
+
+
+def _strip_listed_options(reply: str, options: list[str]) -> str:
+    """Remove a list of the choices from a reply that also shows them as buttons.
+
+    The prompt tells the model not to enumerate a fixed-choice list, because the
+    buttons are already on screen -- and the model does it anyway, printing all
+    nine contents categories twice. Told does not hold; removed does.
+
+    Only a real list is taken out. A reply naming a single choice ("Express it
+    is") is a sentence, not a menu, and is left alone.
+    """
+    if not options or not reply:
+        return reply
+
+    wanted = {option.strip().lower() for option in options}
+    kept: list[str] = []
+    removed = 0
+    for line in reply.splitlines():
+        match = _LISTED_CHOICE.match(line)
+        candidate = (match.group(1) if match else line).strip().lower()
+        if candidate.rstrip(".,;") in wanted:
+            removed += 1
+            continue
+        kept.append(line)
+
+    if removed < 2:
+        return reply
+
+    cleaned = re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
+    # "...best fits your parcel:" now introduces nothing, so end the sentence.
+    cleaned = re.sub(r"[:,]\s*$", ".", cleaned)
+    return cleaned or reply
+
+
+def _replace_last_model_text(history: list, reply: str) -> None:
+    """Put the cleaned reply back into the last model turn of the history."""
+    for content in reversed(history):
+        if getattr(content, "role", None) != "model":
+            continue
+        parts = [p for p in (content.parts or []) if p.text]
+        if not parts:
+            return
+        parts[0].text = reply
+        for extra in parts[1:]:
+            extra.text = ""
+        return
+
+
 # The document a sentence can ask for, and the contents that require it. Only
 # rule-driven documents belong here: a prescription is required by medicines and
 # by nothing else, so the word in a request is enough to know what is being sent.
 DOCUMENT_PROMISES = {"prescription": "medicines"}
 
-# A reply only promises an upload if it actually asks for one. Merely naming a
-# document -- "books need no prescription" -- is not a request.
-ASKS_FOR_IT = ("attach", "upload", "provide", "share", "supply", "send me",
-               "send us", "give me")
+# A reply commits to a document either by asking for it or by stating that this
+# shipment needs one -- "I've noted that a prescription will be required" is a
+# promise as much as "please attach it", and left unrecorded it strands the
+# customer just the same.
+COMMITS_TO_IT = ("attach", "upload", "provide", "share", "supply", "send me",
+                 "send us", "give me", "required", "require", "needed", "noted")
+
+# ...but not when the sentence is hypothetical or a denial. "Books do not need a
+# prescription" and "if you chose medicines, one would be required" are answers
+# to a question, not a requirement being placed on this parcel.
+NOT_A_COMMITMENT = ("if you", "would be", "would need", "would require",
+                    "do not need", "don't need", "does not need", "doesn't need",
+                    "not need", "no prescription", "without a")
 
 
 def _honour_document_promise(session_id: str, reply: str) -> None:
@@ -278,15 +339,20 @@ def _honour_document_promise(session_id: str, reply: str) -> None:
     left alone, and a booked shipment is never reopened.
     """
     spoken = reply.lower()
-    if not any(phrase in spoken for phrase in ASKS_FOR_IT):
+    if any(phrase in spoken for phrase in NOT_A_COMMITMENT):
+        return
+    if not any(phrase in spoken for phrase in COMMITS_TO_IT):
         return
 
     for doc_type, contents in DOCUMENT_PROMISES.items():
         if doc_type not in spoken:
             continue
         summary = tools.get_summary(session_id)
-        if summary.get("ok") and summary.get("pending_documents"):
-            return  # already holding it
+        if summary.get("ok") and (
+            summary.get("pending_documents")
+            or doc_type in (summary.get("documents_received") or [])
+        ):
+            return  # already asked for, or already supplied
         recorded = tools.check_contents(contents, session_id=session_id)
         if recorded.get("recorded_on_draft"):
             logger.info(
@@ -606,8 +672,6 @@ def run_turn(session_id: str, message: str) -> dict:
             "again?"
         )
 
-    save_history(session_id, history)
-
     last_error = next(
         (c.result.get("error") for c in reversed(executed) if not c.ok), None
     )
@@ -624,7 +688,15 @@ def run_turn(session_id: str, message: str) -> dict:
     _honour_document_promise(session_id, reply)
 
     state = _build_state(session_id, booked_reference)
+    # Before the list is stripped out: choosing the buttons reads the reply to
+    # check they answer the question that was actually asked.
     options, expects = _options_for(executed, state, reply)
+
+    reply = _strip_listed_options(reply, options)
+    # The cleaned reply is what goes into the history, so the model reads back
+    # the shape it should have used rather than learning from its own mistake.
+    _replace_last_model_text(history, reply)
+    save_history(session_id, history)
 
     return {
         "reply": reply,

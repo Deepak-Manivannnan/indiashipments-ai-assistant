@@ -158,8 +158,13 @@ async def chat_upload(
     return ChatResponse(
         **run_turn(
             session_id,
-            f"[The user has attached a file named '{file.filename}' for the "
-            f"{doc_type} requirement. It has been received and recorded.]",
+            f"[The user has just attached a file named '{file.filename}' for "
+            f"the {doc_type} requirement. It has been received and recorded, "
+            f"and the {doc_type} requirement is now satisfied. Acknowledge that "
+            "it has been received and recorded -- not verified, checked or "
+            "approved, and say nothing about what it contains, because nothing "
+            f"has read it. Do NOT ask for the {doc_type} again. Then continue "
+            "with the next detail the shipment still needs.]",
         )
     )
 

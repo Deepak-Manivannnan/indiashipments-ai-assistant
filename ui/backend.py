@@ -81,8 +81,13 @@ def upload_document(session_id: str, doc_type: str, file) -> dict:
 
     return run_turn(
         session_id,
-        f"[The user has attached a file named '{file.name}' for the "
-        f"{doc_type} requirement. It has been received and recorded.]",
+        f"[The user has just attached a file named '{file.name}' for the "
+        f"{doc_type} requirement. It has been received and recorded, and the "
+        f"{doc_type} requirement is now satisfied. Acknowledge that it has been "
+        "received and recorded -- not verified, checked or approved, and say "
+        "nothing about what it contains, because nothing has read it. Do NOT "
+        f"ask for the {doc_type} again. Then continue with the next detail "
+        "the shipment still needs.]",
     )
 
 

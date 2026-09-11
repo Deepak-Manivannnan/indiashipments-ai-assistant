@@ -1020,3 +1020,124 @@ def test_the_promise_guard_leaves_an_unrelated_parcel_alone(session_id):
 
     assert tools.get_summary(session_id)["draft"]["contents"] == "books"
     assert tools.get_summary(session_id)["pending_documents"] == []
+
+
+# ---------------------------------------------------------------------------
+# A document that has been supplied must stop looking outstanding
+#
+# The only trace of an upload used to be the absence of a pending request. The
+# rules went on reporting that medicines require a prescription -- true of
+# medicines in general, no longer true of this shipment -- so the agent read the
+# requirement as open and asked for a file the customer had just attached.
+# ---------------------------------------------------------------------------
+
+def _attach_prescription(session_id):
+    return tools.submit_document(
+        session_id=session_id, doc_type="prescription", filename="scan.png",
+        stored_path="uploads/scan.png", size_bytes=1024, content_type="image/png",
+    )
+
+
+def test_a_supplied_prescription_retires_the_requirement(session_id):
+    fill_valid_draft(session_id, contents="medicines")
+    assert tools.validate_shipment(session_id)["requires_document"] == "prescription"
+
+    assert _attach_prescription(session_id)["ok"] is True
+    after = tools.validate_shipment(session_id)
+
+    assert after["requires_document"] is None
+    assert after["documents_received"] == ["prescription"]
+    assert "Do NOT ask for any of these again" in after[
+        "documents_received_instruction"]
+
+
+def test_the_medicines_warning_is_not_repeated_once_it_is_met(session_id):
+    """A condition that has been satisfied is not a warning to read out again."""
+    fill_valid_draft(session_id, contents="medicines")
+    assert any("prescription" in w.lower()
+               for w in tools.validate_shipment(session_id)["warnings"])
+
+    _attach_prescription(session_id)
+
+    assert tools.validate_shipment(session_id)["warnings"] == []
+
+
+@pytest.mark.parametrize("tool", ["get_summary", "save_draft"])
+def test_every_payload_says_the_document_is_on_file(session_id, tool):
+    fill_valid_draft(session_id, contents="medicines")
+    _attach_prescription(session_id)
+
+    payload = (tools.get_summary(session_id) if tool == "get_summary"
+               else tools.save_draft(session_id, weight_g=500))
+
+    assert payload["documents_received"] == ["prescription"]
+
+
+def test_the_promise_guard_does_not_reopen_a_supplied_document(session_id):
+    from app.agent.loop import _honour_document_promise
+
+    fill_valid_draft(session_id, contents="medicines")
+    _attach_prescription(session_id)
+
+    _honour_document_promise(session_id, "Please attach the prescription.")
+
+    assert tools.get_summary(session_id)["pending_documents"] == []
+
+
+def test_a_supplied_document_lets_the_booking_through(session_id):
+    fill_valid_draft(session_id, contents="medicines")
+    _attach_prescription(session_id)
+    tools.validate_shipment(session_id)
+
+    booking = tools.confirm_booking(session_id)
+
+    assert booking["ok"] is True, booking
+
+
+# ---------------------------------------------------------------------------
+# The choices are on screen as buttons, so the reply must not list them too
+# ---------------------------------------------------------------------------
+
+def test_a_bulleted_list_of_the_choices_is_removed_from_the_reply():
+    """The prompt already forbids this and the model does it anyway."""
+    from app.agent.loop import _strip_listed_options
+    from app.rules import CONTENTS_CATEGORIES
+
+    reply = (
+        "I'm sorry for the confusion. Please choose the category that best "
+        "fits your parcel:\n\n"
+        + "\n".join(f"* {c}" for c in CONTENTS_CATEGORIES)
+    )
+
+    cleaned = _strip_listed_options(reply, CONTENTS_CATEGORIES)
+
+    assert "* Documents" not in cleaned
+    assert "Medicines" not in cleaned
+    assert cleaned.endswith("best fits your parcel.")
+
+
+def test_a_numbered_list_is_removed_too():
+    from app.agent.loop import _strip_listed_options
+
+    cleaned = _strip_listed_options(
+        "Which service?\n1. Standard\n2. Express", ["Standard", "Express"]
+    )
+
+    assert cleaned == "Which service?"
+
+
+def test_a_choice_named_in_a_sentence_is_left_alone():
+    """"Express it is" is a sentence, not a menu."""
+    from app.agent.loop import _strip_listed_options
+
+    reply = "Express it is, thanks."
+
+    assert _strip_listed_options(reply, ["Standard", "Express"]) == reply
+
+
+def test_nothing_is_stripped_when_no_buttons_are_shown():
+    from app.agent.loop import _strip_listed_options
+
+    reply = "* Documents\n* Books"
+
+    assert _strip_listed_options(reply, []) == reply

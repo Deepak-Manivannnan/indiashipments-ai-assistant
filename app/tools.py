@@ -466,6 +466,55 @@ def _gate_on_acknowledgement(shipment: Shipment, payload: dict) -> dict:
     return payload
 
 
+def _supplied_documents(db, shipment_id: int) -> list[str]:
+    """The document types already received for this shipment."""
+    return [
+        d.doc_type
+        for d in db.scalars(
+            select(Document).where(
+                Document.shipment_id == shipment_id,
+                Document.status == DOC_ACCEPTED,
+            )
+        )
+    ]
+
+
+def _note_supplied_documents(db, shipment: Shipment, payload: dict) -> dict:
+    """Say which documents are already in hand, and retire the rules they meet.
+
+    Without this the only trace of an upload is the absence of a pending
+    request. The rules keep reporting that medicines require a prescription --
+    which is true of medicines in general and no longer true of this shipment --
+    so the agent reads the requirement as outstanding and asks for a document
+    the customer has already attached.
+    """
+    supplied = _supplied_documents(db, shipment.id)
+    if not supplied:
+        return payload
+
+    payload["documents_received"] = supplied
+    payload["documents_received_instruction"] = (
+        f"Already received and on file for this shipment: {', '.join(supplied)}. "
+        "Do NOT ask for any of these again. If one was just attached, say it "
+        "has been received and recorded -- never that it was verified, checked "
+        "or approved, and never describe what it contains -- then carry on with "
+        "the next detail."
+    )
+
+    if payload.get("requires_document") in supplied:
+        payload["requires_document"] = None
+
+    # A condition that has been met is no longer a warning to repeat.
+    if payload.get("warnings"):
+        payload["warnings"] = [
+            warning
+            for warning in payload["warnings"]
+            if not any(doc_type in warning.lower() for doc_type in supplied)
+        ]
+
+    return payload
+
+
 def _pending_documents(db, shipment_id: int) -> list[Document]:
     return list(
         db.scalars(
@@ -680,7 +729,10 @@ def save_draft(
         payload = _gate_on_sender_choice(
             db, session_id, shipment,
             _gate_on_acknowledgement(
-                shipment, _gate_on_document(db, shipment, payload)
+                shipment,
+                _gate_on_document(
+                    db, shipment, _note_supplied_documents(db, shipment, payload)
+                ),
             ),
         )
 
@@ -1024,7 +1076,10 @@ def get_summary(session_id: str) -> dict:
         return _gate_on_sender_choice(
             db, session_id, shipment,
             _gate_on_acknowledgement(
-                shipment, _gate_on_document(db, shipment, summary)
+                shipment,
+                _gate_on_document(
+                    db, shipment, _note_supplied_documents(db, shipment, summary)
+                ),
             ),
         )
 
@@ -1119,7 +1174,10 @@ def validate_shipment(session_id: str) -> dict:
         return _gate_on_sender_choice(
             db, session_id, shipment,
             _gate_on_acknowledgement(
-                shipment, _gate_on_document(db, shipment, payload)
+                shipment,
+                _gate_on_document(
+                    db, shipment, _note_supplied_documents(db, shipment, payload)
+                ),
             ),
         )
 
