@@ -901,34 +901,94 @@ def resolve_address_conflict(session_id: str, role: str, keep: str) -> dict:
         }
 
 
-def check_contents(description: str) -> dict:
+def _record_conditional_contents(session_id: str, description: str,
+                                 doc_type: str) -> bool:
+    """Put a screened item on the draft so its document requirement is real.
+
+    The upload control on screen is drawn from the pending documents in the
+    database. Screening alone used to record nothing, so the agent would say
+    "please attach the prescription" and the customer had nothing to attach it
+    with -- the requirement existed only in the sentence.
+
+    Only fills a draft with no contents yet. Someone asking "what about
+    medicines?" while already sending books is asking a question, not changing
+    their parcel, and their draft is left alone.
+    """
+    with session_scope() as db:
+        state = _get_state(db, session_id)
+        shipment = _get_draft(db, session_id)
+        if shipment is None:
+            if state.draft_shipment_id is not None:
+                previous = db.get(Shipment, state.draft_shipment_id)
+                if previous is not None and previous.reference:
+                    return False  # the last shipment is booked; do not reopen it
+            shipment = Shipment(status=STATUS_DRAFT)
+            db.add(shipment)
+            db.flush()
+            state.draft_shipment_id = shipment.id
+        elif (shipment.contents or "").strip().lower() not in (
+            "", description.strip().lower()
+        ):
+            return False
+
+        shipment.contents = description.strip()[:MAX_TEXT_LENGTH]
+        shipment.validated = False
+        _sync_rule_documents(db, shipment.id, doc_type)
+        return True
+
+
+def check_contents(description: str, session_id: str | None = None) -> dict:
     """Screen a description of the contents against the acceptance rules.
 
-    Read-only and cheap, so the agent can consult it before saying anything
-    about whether an item may be sent. Without this the model answers from its
-    own knowledge of postal regulations, which is exactly what the brief
-    forbids.
+    Cheap, so the agent can consult it before saying anything about whether an
+    item may be sent. Without this the model answers from its own knowledge of
+    postal regulations, which is exactly what the brief forbids.
+
+    Screening an item that needs a document also records it on the draft, so
+    that the requirement the agent is about to describe is one the application
+    is actually holding -- and so the upload control appears.
     """
     decision = classify_contents(description)
+
+    recorded = bool(
+        session_id
+        and decision.requires_document
+        and _record_conditional_contents(
+            session_id, description, decision.requires_document
+        )
+    )
+
+    if not decision.requires_document:
+        note = ""
+    elif recorded:
+        note = (
+            f" A {decision.requires_document} is required before this shipment "
+            "can go any further: say so and ask the user to attach it. There is "
+            "an upload control on screen for them to use. Ask for NOTHING else "
+            "in that message -- no weight, no size, no addresses. Collect the "
+            "rest only after it has been supplied."
+        )
+    else:
+        # Answering a question about something they are not sending. Saying
+        # "attach it" here would point at an upload control that is not there.
+        note = (
+            f" Sending that would require a {decision.requires_document}. This "
+            "is an answer to a question, not a change to their shipment, so "
+            "explain the rule but do NOT ask them to attach anything yet. If "
+            "they decide to send it, record it with save_draft first."
+        )
+
     return {
         "ok": True,
         "description": description,
         "decision": decision.decision,
         "reasons": decision.reasons,
         "requires_document": decision.requires_document,
+        "recorded_on_draft": recorded,
         "note": (
             "These reasons are the only grounds you may give. Do not cite "
             "regulations, authorities or classifications that are not stated "
-            "here."
-            + (
-                f" A {decision.requires_document} is required before this "
-                "shipment can go any further: say so and ask the user to "
-                "attach it, and ask for NOTHING else in that message -- no "
-                "weight, no size, no addresses. Collect the rest only after it "
-                "has been supplied."
-                if decision.requires_document
-                else ""
-            )
+            "here." + note
         ),
     }
 

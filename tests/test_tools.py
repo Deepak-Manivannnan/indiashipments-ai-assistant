@@ -923,3 +923,54 @@ def test_a_service_we_do_not_offer_is_still_refused(session_id):
 
     assert result["validated"] is False
     assert any("Overnight" in error for error in result["errors"])
+
+
+# ---------------------------------------------------------------------------
+# Screening an item makes its document requirement real
+#
+# The upload control is drawn from the pending documents in the database. If
+# screening records nothing, the agent says "please attach the prescription"
+# and the customer has nothing to attach it with.
+# ---------------------------------------------------------------------------
+
+def test_screening_medicines_raises_the_requirement_that_draws_the_uploader(
+    session_id,
+):
+    result = tools.check_contents("medicines", session_id=session_id)
+
+    assert result["requires_document"] == "prescription"
+    assert result["recorded_on_draft"] is True
+    assert tools.get_summary(session_id)["pending_documents"] == ["prescription"]
+    assert "upload control on screen" in result["note"]
+
+
+def test_screening_a_blocked_item_records_nothing(session_id):
+    """A blocked parcel has no document that would rescue it."""
+    result = tools.check_contents("a spare lithium battery", session_id=session_id)
+
+    assert result["decision"] == "blocked"
+    assert result["recorded_on_draft"] is False
+    assert tools.get_summary(session_id).get("ok") is False   # no draft at all
+
+
+def test_asking_about_medicines_while_sending_books_changes_nothing(session_id):
+    """A question is not a change of parcel, and must not promise an uploader."""
+    tools.save_draft(session_id, contents="books")
+
+    result = tools.check_contents("medicines", session_id=session_id)
+
+    assert result["recorded_on_draft"] is False
+    assert tools.get_summary(session_id)["draft"]["contents"] == "books"
+    assert tools.get_summary(session_id)["pending_documents"] == []
+    assert "do NOT ask them to attach anything yet" in result["note"]
+
+
+def test_screening_after_a_booking_does_not_reopen_it(session_id):
+    fill_valid_draft(session_id)
+    tools.validate_shipment(session_id)
+    booking = tools.confirm_booking(session_id)
+    assert booking["ok"] is True
+
+    result = tools.check_contents("medicines", session_id=session_id)
+
+    assert result["recorded_on_draft"] is False

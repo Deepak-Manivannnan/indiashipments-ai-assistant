@@ -241,6 +241,7 @@ DECLARATIONS = [
 # for these; the model never sees or sets it.
 SESSION_SCOPED = {
     "save_draft",
+    "check_contents",
     "get_summary",
     "validate_shipment",
     "request_document",
