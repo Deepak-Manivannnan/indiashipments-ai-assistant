@@ -12,6 +12,7 @@ Arguments are flat scalars rather than nested objects because that is what
 model function-calling schemas handle reliably.
 """
 
+import re
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -36,7 +37,10 @@ from app.models import (
 from app.rules import (
     CONTENTS_CATEGORIES,
     HIGH_VALUE_THRESHOLD_INR,
+    MAX_DECLARED_VALUE_INR,
+    MAX_TEXT_LENGTH,
     classify_contents,
+    normalise_service,
     validate_draft,
 )
 from app.services import geocode, pin_api
@@ -51,6 +55,127 @@ PRICE_TABLE = {
 # Document types the rule engine raises on its own, and may therefore withdraw
 # on its own. A document requested explicitly is never withdrawn automatically.
 RULE_DRIVEN_DOC_TYPES = ["prescription"]
+
+# How people actually write a measurement, and what it means in the unit the
+# field is stored in. Interpreting this here rather than leaving it to the model
+# is the same principle as everything else in this layer: the model is good at
+# noticing that the customer said "two and a half kilos", and must not be the
+# thing that decides what that is in grams.
+_UNIT_FACTORS = {
+    "weight_g": {
+        "kg": 1000.0, "kgs": 1000.0, "kilo": 1000.0, "kilos": 1000.0,
+        "kilogram": 1000.0, "kilograms": 1000.0,
+        "g": 1.0, "gm": 1.0, "gms": 1.0, "gram": 1.0, "grams": 1.0,
+    },
+    "_dimension": {
+        "mm": 1.0, "millimetre": 1.0, "millimetres": 1.0, "millimeter": 1.0,
+        "millimeters": 1.0,
+        "cm": 10.0, "centimetre": 10.0, "centimetres": 10.0,
+        "centimeter": 10.0, "centimeters": 10.0,
+        "m": 1000.0, "metre": 1000.0, "metres": 1000.0, "meter": 1000.0,
+        "meters": 1000.0,
+        "in": 25.4, "inch": 25.4, "inches": 25.4,
+    },
+    "declared_value": {
+        "rs": 1.0, "rs.": 1.0, "inr": 1.0, "rupee": 1.0, "rupees": 1.0,
+        "₹": 1.0,
+    },
+}
+
+_NUMBER_IN_TEXT = re.compile(r"-?\d+(?:\.\d+)?")
+
+
+def _parse_measurement(field: str, value) -> tuple[float | None, str | None]:
+    """Read a number a person may have written with a unit or a currency symbol.
+
+    "2 kg" in a field counted in grams is 2000, not 2 -- and not a value to be
+    quietly discarded either, which is what happens if this only accepts bare
+    numbers. A unit that is not recognised is refused rather than guessed at.
+
+    Returns (number, refusal); exactly one is None.
+    """
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        number = float(value)
+        return (None, f"'{value}' is not a usable measurement.") if (
+            number != number or number in (float("inf"), float("-inf"))
+        ) else (number, None)
+
+    text = str(value).strip().lower().replace(",", "")
+    if not text:
+        return None, None
+
+    found = _NUMBER_IN_TEXT.search(text)
+    if found is None:
+        return None, f"'{value}' is not a number, so it was not recorded."
+
+    number = float(found.group())
+    remainder = (text[: found.start()] + text[found.end():]).strip()
+    remainder = remainder.replace("₹", " ₹ ").strip()
+    if not remainder:
+        return number, None
+
+    table = _UNIT_FACTORS["_dimension" if field.endswith("_mm") else field]
+    words = [word for word in re.split(r"[\s./]+", remainder) if word]
+    factor = 1.0
+    for word in words:
+        if word in table:
+            factor = table[word]
+        elif word not in ("of", "about", "approx", "approximately", "around"):
+            unit = " ".join(words)
+            return None, (
+                f"'{value}' could not be read as a measurement -- '{unit}' is "
+                "not a unit this service recognises, so it was not recorded. "
+                "Ask the customer for the number on its own."
+            )
+    # Rounded because a unit conversion in binary floating point produces
+    # 304.79999999999995 for twelve inches, and that number goes on screen.
+    return round(number * factor, 2), None
+
+
+def _screen_value(field: str, value):
+    """Decide whether a supplied field is storable, before it reaches the row.
+
+    The rule engine is the place where business rules live, but it only runs
+    after the draft has been written, and a number wider than its column or a
+    string longer than its column fails at the write with a database error the
+    customer can make nothing of. So the few limits that are about storage are
+    checked here, in front of the row, and returned as a sentence.
+
+    Returns (value_to_store, refusal). Exactly one of the two is None.
+    """
+    if value is None:
+        return None, None
+
+    if field in ("weight_g", "length_mm", "width_mm", "height_mm",
+                 "declared_value"):
+        number, refusal = _parse_measurement(field, value)
+        if refusal or number is None:
+            return None, refusal
+        if field == "declared_value" and number > MAX_DECLARED_VALUE_INR:
+            return None, (
+                f"A declared value of Rs {number:,.0f} is above the "
+                f"Rs {MAX_DECLARED_VALUE_INR:,} ceiling for a parcel, so it "
+                "was not recorded. Ask the customer to confirm the value."
+            )
+        # Dimensions and weight are held as JSON, so only the rule engine
+        # bounds them; it reports anything out of range as a proper error.
+        return number, None
+
+    if field == "service_type":
+        # Stored as this application spells it, so the draft panel and the
+        # booking agree with the option the customer was offered.
+        return normalise_service(value) or str(value).strip() or None, None
+
+    text = str(value).strip()
+    if len(text) > MAX_TEXT_LENGTH:
+        return None, (
+            f"That {field.replace('_', ' ')} is {len(text)} characters long, "
+            f"longer than the {MAX_TEXT_LENGTH} this service stores, so it was "
+            "not recorded. Ask for a shorter version."
+        )
+    # An empty string is not an answer; leave whatever was already there.
+    return (text or None), None
+
 
 # Words that describe the role rather than name the person. Saving one of
 # these puts something on screen that looks like real data and is not, so they
@@ -164,6 +289,36 @@ def _require_document(db, shipment_id: int, doc_type: str) -> None:
                      status=DOC_PENDING)
         )
         db.flush()
+
+
+def _sync_rule_documents(db, shipment_id: int, required: str | None) -> None:
+    """Bring the pending document requests in line with the rules as they stand.
+
+    Requirements this application raises by itself are withdrawn again when the
+    rule stops applying -- a user who says "medicines" and then corrects it to
+    "books" must not stay blocked on a prescription forever. Only un-uploaded,
+    rule-driven requests are cleared; anything requested explicitly, or already
+    supplied, is left alone.
+
+    Both save_draft and validate_shipment call this, because the requirement
+    follows the contents and the contents can change in either.
+    """
+    stale = db.scalars(
+        select(Document).where(
+            Document.shipment_id == shipment_id,
+            Document.status == DOC_PENDING,
+            Document.uploaded_at.is_(None),
+            Document.doc_type.in_(RULE_DRIVEN_DOC_TYPES),
+            Document.doc_type != (required or ""),
+        )
+    ).all()
+    for document in stale:
+        db.delete(document)
+    if stale:
+        db.flush()
+
+    if required:
+        _require_document(db, shipment_id, required)
 
 
 SENDER_OFFER_DECLINED = "sender_offer_declined"
@@ -353,9 +508,58 @@ def save_draft(
     Only the arguments actually supplied are written, so partial information
     from one conversational turn never erases what an earlier turn established.
     """
+    supplied = {
+        "sender_name": sender_name, "sender_phone": sender_phone,
+        "sender_address": sender_address, "sender_city": sender_city,
+        "sender_state": sender_state, "sender_pin": sender_pin,
+        "recipient_name": recipient_name, "recipient_phone": recipient_phone,
+        "recipient_address": recipient_address, "recipient_city": recipient_city,
+        "recipient_state": recipient_state, "recipient_pin": recipient_pin,
+        "weight_g": weight_g, "length_mm": length_mm, "width_mm": width_mm,
+        "height_mm": height_mm, "service_type": service_type,
+        "contents": contents, "declared_value": declared_value,
+    }
+    refusals: list[str] = []
+    for field, value in list(supplied.items()):
+        supplied[field], refusal = _screen_value(field, value)
+        if refusal:
+            refusals.append(refusal)
+
+    sender_name = supplied["sender_name"]
+    sender_phone = supplied["sender_phone"]
+    sender_address = supplied["sender_address"]
+    sender_city = supplied["sender_city"]
+    sender_state = supplied["sender_state"]
+    sender_pin = supplied["sender_pin"]
+    recipient_name = supplied["recipient_name"]
+    recipient_phone = supplied["recipient_phone"]
+    recipient_address = supplied["recipient_address"]
+    recipient_city = supplied["recipient_city"]
+    recipient_state = supplied["recipient_state"]
+    recipient_pin = supplied["recipient_pin"]
+    weight_g = supplied["weight_g"]
+    length_mm = supplied["length_mm"]
+    width_mm = supplied["width_mm"]
+    height_mm = supplied["height_mm"]
+    service_type = supplied["service_type"]
+    contents = supplied["contents"]
+    declared_value = supplied["declared_value"]
+
     with session_scope() as db:
         state = _get_state(db, session_id)
         shipment = _get_draft(db, session_id)
+
+        # A booked shipment is never edited. If this conversation has already
+        # confirmed one, saving again opens a fresh draft and leaves the booked
+        # row exactly as it was booked. Said out loud here, because otherwise a
+        # customer who follows "booked!" with "actually make it 5 kg" is quietly
+        # started on a second shipment and finds out much later.
+        started_after_booking = None
+        if shipment is None and state.draft_shipment_id is not None:
+            previous = db.get(Shipment, state.draft_shipment_id)
+            if previous is not None and previous.reference:
+                started_after_booking = previous.reference
+
         if shipment is None:
             shipment = Shipment(status=STATUS_DRAFT)
             db.add(shipment)
@@ -433,21 +637,36 @@ def save_draft(
             "ask_next_instruction": as_dict["ask_next_instruction"],
             "note": "Draft saved. It must be validated again before booking.",
         }
-        payload = _gate_on_sender_choice(
-            db, session_id, shipment,
-            _gate_on_acknowledgement(
-                shipment, _gate_on_document(db, shipment, payload)
-            ),
-        )
+        if started_after_booking:
+            payload["started_new_shipment"] = started_after_booking
+            payload["started_new_shipment_instruction"] = (
+                f"Shipment {started_after_booking} is already booked and cannot "
+                "be changed here -- these details have started a new shipment "
+                "instead. Say so before anything else, and ask the customer "
+                "whether that is what they intended. If they wanted to change "
+                f"{started_after_booking}, tell them that booking has to be "
+                "amended by support, which this assistant cannot do."
+            )
 
+        if refusals:
+            payload["not_recorded"] = refusals
+            payload["not_recorded_instruction"] = (
+                "Some of what was supplied could not be stored, for the reasons "
+                "listed. Tell the customer plainly which detail was not saved "
+                "and why, using those reasons, before asking anything else."
+            )
         # Screening the contents here as well as in validate_shipment means the
         # verdict on a prohibited or restricted item always reaches the model as
         # a tool result. Otherwise a model that answers straight after saving
         # would be stating a rule from its own knowledge rather than from ours.
+        #
+        # This runs before the gates below, not after: the gates read the
+        # pending documents, so screening first is what lets a correction --
+        # "medicines" changed to "books" -- lift the prescription request in the
+        # same turn it was made, instead of one turn later.
         if shipment.contents:
             decision = classify_contents(shipment.contents)
-            if decision.requires_document:
-                _require_document(db, shipment.id, decision.requires_document)
+            _sync_rule_documents(db, shipment.id, decision.requires_document)
             payload["contents_check"] = {
                 "decision": decision.decision,
                 "reasons": decision.reasons,
@@ -457,6 +676,13 @@ def save_draft(
                     "cannot be sent. Do not add rules of your own."
                 ),
             }
+
+        payload = _gate_on_sender_choice(
+            db, session_id, shipment,
+            _gate_on_acknowledgement(
+                shipment, _gate_on_document(db, shipment, payload)
+            ),
+        )
 
         return payload
 
@@ -810,27 +1036,10 @@ def validate_shipment(session_id: str) -> dict:
         result = validate_draft(draft)
         shipment.validated = result.ok
 
-        # Requirements this rule engine raises by itself are withdrawn again if
-        # the rule stops applying -- a user who says "medicines" and then
-        # corrects it to "documents" must not stay blocked on a prescription
-        # forever. Only un-uploaded, rule-driven requests are cleared; anything
-        # requested explicitly or already supplied is left alone.
-        stale = db.scalars(
-            select(Document).where(
-                Document.shipment_id == shipment.id,
-                Document.status == DOC_PENDING,
-                Document.uploaded_at.is_(None),
-                Document.doc_type.in_(RULE_DRIVEN_DOC_TYPES),
-                Document.doc_type != (result.requires_document or ""),
-            )
-        ).all()
-        for document in stale:
-            db.delete(document)
-
-        # A required document is recorded now so that confirm_booking can block
-        # on it even if the model forgets to ask.
-        if result.requires_document:
-            _require_document(db, shipment.id, result.requires_document)
+        # Withdraw a requirement the rules no longer raise, and record one they
+        # do, so that confirm_booking can block on it even if the model forgets
+        # to ask.
+        _sync_rule_documents(db, shipment.id, result.requires_document)
 
         payload = result.as_dict()
         payload.update(
@@ -1147,7 +1356,11 @@ def confirm_booking(session_id: str) -> dict:
             )
         )
 
-        state.draft_shipment_id = None  # the draft is now a real shipment
+        # The pointer stays on the shipment that was just booked rather than
+        # being cleared. _get_draft only ever returns a row still in Draft
+        # status, so this conversation has no draft either way -- but keeping
+        # the link is what lets save_draft notice that the next detail typed
+        # arrived after a booking, and say so.
 
         return {
             "ok": True,

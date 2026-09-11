@@ -17,6 +17,19 @@ MIN_DIMENSIONS_MM = (140, 90, 10)  # applied to the sorted L>=W>=H triple
 MAX_TOTAL_DIMENSIONS_MM = 3000  # sum of the three sides
 HIGH_VALUE_THRESHOLD_INR = 50_000
 
+# --- Outer bounds, assumed rather than stated ---
+# The brief fixes the rules above and requires weight, dimensions and declared
+# value to be positive, but says nothing about an upper end. These bounds exist
+# because "positive" alone accepts a 100-tonne parcel worth a trillion rupees,
+# and because a number that absurd is almost always a slip -- 2 kg typed into a
+# field that counts grams, or a value entered in paise. Catching it here turns a
+# storage error into a sentence the customer can act on.
+MIN_WEIGHT_G = 1  # below a gram is a unit mix-up, not a parcel
+MAX_WEIGHT_G = 50_000  # 50 kg, the heaviest single parcel accepted
+MAX_DECLARED_VALUE_INR = 10_000_000  # Rs 1 crore
+PHONE_DIGITS = 10  # after stripping punctuation and any +91 or leading 0
+MAX_TEXT_LENGTH = 200  # names, addresses and the contents description
+
 # Offered to the user as selectable options; free text is still accepted.
 CONTENTS_CATEGORIES = [
     "Documents",
@@ -338,11 +351,48 @@ def is_valid_pin(pin) -> bool:
     return bool(pin) and str(pin).isdigit() and len(str(pin)) == PIN_LENGTH
 
 
+def normalise_service(service) -> str | None:
+    """The service type as this application spells it, or None if unrecognised.
+
+    A customer who types "express" has chosen Express. Matching the capital
+    letter is the application's job, not theirs.
+    """
+    wanted = str(service or "").strip().lower()
+    for known in SERVICE_TYPES:
+        if known.lower() == wanted:
+            return known
+    return None
+
+
 def _positive(value) -> bool:
     try:
         return float(value) > 0
     except (TypeError, ValueError):
         return False
+
+
+def phone_digits(phone) -> str:
+    """The dialable digits in a phone number, without country code or trunk 0.
+
+    Accepts the shapes people actually type: "+91 98470 12345", "098470-12345",
+    "(0484) 234 5678".
+    """
+    digits = re.sub(r"\D", "", str(phone or ""))
+    if len(digits) == PHONE_DIGITS + 2 and digits.startswith("91"):
+        digits = digits[2:]
+    elif len(digits) == PHONE_DIGITS + 1 and digits.startswith("0"):
+        digits = digits[1:]
+    return digits
+
+
+def is_valid_phone(phone) -> bool:
+    """An Indian number has ten digits once the prefixes are removed.
+
+    Deliberately not stricter than that. Requiring a 6-9 first digit would be
+    right for mobiles and wrong for the landlines behind area codes like 0484,
+    and a pickup address with a landline on it is a real shipment.
+    """
+    return len(phone_digits(phone)) == PHONE_DIGITS
 
 
 def _check_person(person: dict | None, role: str, result: ValidationResult) -> None:
@@ -358,6 +408,14 @@ def _check_person(person: dict | None, role: str, result: ValidationResult) -> N
             "exactly six digits."
         )
 
+    phone = person.get("phone")
+    if str(phone or "").strip() and not is_valid_phone(phone):
+        result.errors.append(
+            f"The {role} phone number '{phone}' is not valid -- an Indian phone "
+            f"number has {PHONE_DIGITS} digits, with or without a +91 prefix. "
+            "The courier needs a working number to arrange the handover."
+        )
+
 
 def _check_package(package: dict | None, result: ValidationResult) -> None:
     package = package or {}
@@ -365,8 +423,22 @@ def _check_package(package: dict | None, result: ValidationResult) -> None:
         if package.get(fname) in (None, ""):
             result.missing.append(f"package.{fname}")
 
-    if package.get("weight_g") is not None and not _positive(package.get("weight_g")):
-        result.errors.append("Package weight must be greater than zero.")
+    weight = package.get("weight_g")
+    if weight is not None:
+        if not _positive(weight):
+            result.errors.append("Package weight must be greater than zero.")
+        elif float(weight) < MIN_WEIGHT_G:
+            # Almost always a unit slip: "0.5" meant kilograms.
+            result.errors.append(
+                f"A weight of {float(weight):g} g is below the minimum of "
+                f"{MIN_WEIGHT_G} g. If that was meant in kilograms, "
+                f"{float(weight):g} kg is {int(float(weight) * 1000)} g."
+            )
+        elif float(weight) > MAX_WEIGHT_G:
+            result.errors.append(
+                f"This parcel weighs {float(weight) / 1000:g} kg, above the "
+                f"{MAX_WEIGHT_G // 1000} kg limit for a single shipment."
+            )
 
     dims = [package.get(k) for k in ("length_mm", "width_mm", "height_mm")]
     if all(d is not None for d in dims):
@@ -408,6 +480,8 @@ def validate_draft(draft: dict) -> ValidationResult:
     service = draft.get("service_type")
     if not service:
         result.missing.append("service_type")
+    elif normalise_service(service) is not None:
+        pass  # "express" is Express; the casing is not the customer's problem
     elif service not in SERVICE_TYPES:
         result.errors.append(
             f"'{service}' is not a service we offer. Choose "
@@ -432,6 +506,12 @@ def validate_draft(draft: dict) -> ValidationResult:
         result.missing.append("declared_value")
     elif not _positive(value):
         result.errors.append("Declared value must be greater than zero.")
+    elif float(value) > MAX_DECLARED_VALUE_INR:
+        result.errors.append(
+            f"A declared value of Rs {float(value):,.0f} is above the "
+            f"Rs {MAX_DECLARED_VALUE_INR:,} ceiling for a parcel. Anything "
+            "worth more than that needs a specialist carrier, not this service."
+        )
     elif float(value) > HIGH_VALUE_THRESHOLD_INR:
         result.requires_insurance_ack = True
         result.warnings.append(

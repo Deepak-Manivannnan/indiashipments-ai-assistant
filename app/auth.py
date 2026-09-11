@@ -15,6 +15,7 @@ from sqlalchemy import select
 
 from app.db import SessionLocal
 from app.models import Customer
+from app.rules import PHONE_DIGITS, is_valid_phone, is_valid_pin
 
 PBKDF2_ITERATIONS = 200_000
 SALT_BYTES = 16
@@ -76,6 +77,42 @@ def create_customer(
         return {"ok": False, "error": "Password must be at least 8 characters."}
     if not (name or "").strip():
         return {"ok": False, "error": "Please enter your name."}
+
+    # The profile is the source of the pre-filled sender block, so anything
+    # accepted here is something a shipment will later be validated against.
+    # Checking it at the form, with the same rules, means the customer hears
+    # about a mistyped PIN while they are looking at the field -- not three
+    # questions into booking a parcel. These fields are also narrower in the
+    # database than a form will happily submit, and an over-long one is a
+    # database error rather than a sentence unless it is caught here.
+    name = name.strip()
+    phone = (phone or "").strip() or None
+    address = (address or "").strip() or None
+    city = (city or "").strip() or None
+    state = (state or "").strip() or None
+    pin = (pin or "").strip() or None
+
+    for label, value, limit in [
+        ("name", name, 120), ("address", address, 255),
+        ("city", city, 120), ("state", state, 120), ("phone", phone, 20),
+    ]:
+        if value and len(value) > limit:
+            return {
+                "ok": False,
+                "error": f"That {label} is too long -- please keep it under "
+                         f"{limit} characters.",
+            }
+
+    if phone and not is_valid_phone(phone):
+        return {
+            "ok": False,
+            "error": f"Please enter a valid {PHONE_DIGITS}-digit phone number.",
+        }
+    if pin and not is_valid_pin(pin):
+        return {
+            "ok": False,
+            "error": "Please enter a valid six-digit PIN code.",
+        }
 
     db = SessionLocal()
     try:

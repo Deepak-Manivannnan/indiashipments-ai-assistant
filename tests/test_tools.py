@@ -712,3 +712,214 @@ def test_details_already_given_survive_the_prefill(session_id):
     assert sender["address"] == "14 SS Street, Tollgate"
     assert sender["pin"] == "600081"
     assert sender["name"] == "Rahul Menon"   # the blanks, and only the blanks
+
+
+# ---------------------------------------------------------------------------
+# Values at the edges of what can be stored or accepted
+#
+# Every case below was found by sweeping the booking flow for inputs a real
+# customer could plausibly produce -- a weight in the wrong unit, a value typed
+# with too many zeroes, a pasted paragraph where a description belongs.
+# ---------------------------------------------------------------------------
+
+def test_a_weight_below_a_gram_is_read_as_a_unit_mistake(session_id):
+    """0.5 is grams here, but the customer almost certainly meant kilograms."""
+    fill_valid_draft(session_id, weight_g=0.5)
+    result = tools.validate_shipment(session_id)
+
+    assert result["validated"] is False
+    assert any("500 g" in error for error in result["errors"])
+
+
+def test_a_parcel_over_the_weight_limit_is_refused(session_id):
+    fill_valid_draft(session_id, weight_g=60_000)
+    result = tools.validate_shipment(session_id)
+
+    assert result["validated"] is False
+    assert any("50 kg" in error for error in result["errors"])
+
+
+def test_an_impossible_declared_value_is_refused_not_stored(session_id):
+    """The number is wider than its column: without a guard this is a crash."""
+    payload = fill_valid_draft(session_id, declared_value=10**11)
+
+    assert payload["ok"] is True            # the rest of the draft still saved
+    assert payload["not_recorded"]
+    assert "1 crore" in payload["not_recorded"][0] or "10,000,000" in payload[
+        "not_recorded"][0]
+    assert tools.get_summary(session_id)["draft"]["declared_value"] is None
+
+
+def test_an_overlong_description_is_refused_not_truncated(session_id):
+    """Truncating would hide whatever was written past the cut, rules included."""
+    payload = fill_valid_draft(session_id, contents="C" * 400)
+
+    assert payload["not_recorded"]
+    assert "shorter" in payload["not_recorded"][0]
+    assert tools.get_summary(session_id)["draft"]["contents"] != "C" * 400
+
+
+def test_a_phone_number_that_cannot_be_dialled_is_refused(session_id):
+    fill_valid_draft(session_id, sender_phone="call me maybe")
+    result = tools.validate_shipment(session_id)
+
+    assert result["validated"] is False
+    assert any("phone" in error for error in result["errors"])
+
+
+def test_a_phone_number_written_with_a_country_code_is_accepted(session_id):
+    fill_valid_draft(session_id, sender_phone="+91 98470 12345")
+    result = tools.validate_shipment(session_id)
+
+    assert result["validated"] is True
+
+
+def test_correcting_the_contents_lifts_the_document_request_at_once(session_id):
+    """Not one turn later: the gate is applied after the contents are screened.
+
+    A customer who says "medicines" and corrects it to "books" in the next
+    breath was otherwise still asked for a prescription, because save_draft
+    gated on documents before it screened the new contents.
+    """
+    fill_valid_draft(session_id, contents="medicines")
+    assert tools.get_summary(session_id).get("awaiting_document") == "prescription"
+
+    payload = tools.save_draft(session_id, contents="books")
+
+    assert payload.get("awaiting_document") is None
+    assert tools.get_summary(session_id).get("awaiting_document") is None
+    assert tools.validate_shipment(session_id)["validated"] is True
+
+
+# ---------------------------------------------------------------------------
+# The sign-up form
+#
+# Whatever is accepted here becomes the pre-filled sender block on every
+# shipment this customer books, so the profile is held to the same rules as a
+# draft -- and to the widths of its own columns, which a form will otherwise
+# overflow into a database error.
+# ---------------------------------------------------------------------------
+
+def _signup(**overrides):
+    fields = {
+        "email": f"edge{uuid.uuid4().hex[:8]}@example.com",
+        "password": "demo1234", "name": "Edge Case", "phone": "9847012345",
+        "address": "1 Test Road", "city": "Kochi", "state": "Kerala",
+        "pin": "682031",
+    }
+    fields.update(overrides)
+    result = auth.create_customer(**fields)
+    if result["ok"]:
+        db = SessionLocal()
+        try:
+            customer = db.get(auth.Customer, result["customer"]["id"])
+            if customer is not None:
+                db.delete(customer)
+                db.commit()
+        finally:
+            db.close()
+    return result
+
+
+@pytest.mark.parametrize("label,field,value", [
+    ("a seven-digit PIN", "pin", "6820311"),
+    ("a phone that is not a number", "phone", "not a number"),
+    ("a name longer than its column", "name", "A" * 200),
+    ("an address longer than its column", "address", "B" * 300),
+])
+def test_signup_refuses_bad_profile_details(label, field, value):
+    result = _signup(**{field: value})
+
+    assert result["ok"] is False, label
+    assert result["error"]          # a sentence, not a database error
+
+
+@pytest.mark.parametrize("phone", ["9847012345", "+91 98470 12345", None])
+def test_signup_accepts_the_ways_people_write_a_phone_number(phone):
+    assert _signup(phone=phone)["ok"] is True
+
+
+def test_talking_on_after_a_booking_starts_a_new_shipment_and_says_so(session_id):
+    """"Actually, make it 5 kg" must not quietly alter a confirmed booking."""
+    fill_valid_draft(session_id)
+    tools.validate_shipment(session_id)
+    booking = tools.confirm_booking(session_id)
+    assert booking["ok"] is True
+
+    payload = tools.save_draft(session_id, weight_g=5000)
+
+    assert payload["started_new_shipment"] == booking["reference"]
+    assert booking["reference"] in payload["started_new_shipment_instruction"]
+
+    # And the booked shipment is untouched by the edit.
+    db = SessionLocal()
+    try:
+        booked = db.scalars(
+            select(Shipment).where(Shipment.reference == booking["reference"])
+        ).one()
+        assert booked.package_json["weight_g"] == 2000
+        assert booked.status == STATUS_BOOKED
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# Reading a number the way a person wrote it
+#
+# The model passes through whatever the customer said. "2 kg" in a field
+# counted in grams is 2000 -- and deciding that is this layer's job, because a
+# model that converts units in its head is a model that will one day book a
+# two-gram parcel.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("written,grams", [
+    (2000, 2000), ("2000", 2000), ("2 kg", 2000), ("2kg", 2000),
+    ("2.5 kg", 2500), ("500 g", 500), ("1,500 grams", 1500), ("about 2 kg", 2000),
+])
+def test_a_weight_is_read_in_the_unit_it_was_written_in(session_id, written, grams):
+    fill_valid_draft(session_id, weight_g=written)
+
+    assert tools.get_summary(session_id)["draft"]["package"]["weight_g"] == grams
+
+
+@pytest.mark.parametrize("written,rupees", [
+    ("1,500", 1500), ("Rs 900", 900), ("Rs. 2,000", 2000), ("900 INR", 900),
+])
+def test_a_declared_value_survives_the_way_it_was_typed(session_id, written, rupees):
+    fill_valid_draft(session_id, declared_value=written)
+
+    assert tools.get_summary(session_id)["draft"]["declared_value"] == rupees
+
+
+@pytest.mark.parametrize("written,mm", [("30 cm", 300), ("1 m", 1000),
+                                        ("12 inches", 304.8), ("300", 300)])
+def test_a_dimension_is_converted_not_taken_at_face_value(session_id, written, mm):
+    fill_valid_draft(session_id, length_mm=written)
+
+    assert tools.get_summary(session_id)["draft"]["package"]["length_mm"] == mm
+
+
+@pytest.mark.parametrize("written", ["2 pounds", "$900", "heavy"])
+def test_a_unit_we_do_not_know_is_refused_rather_than_guessed_at(session_id, written):
+    """Guessing here would book a parcel at a weight nobody chose."""
+    payload = fill_valid_draft(session_id, weight_g=written)
+
+    assert payload["not_recorded"]
+    assert tools.get_summary(session_id)["draft"]["package"].get("weight_g") is None
+
+
+@pytest.mark.parametrize("typed", ["express", "EXPRESS", "Express", "standard"])
+def test_a_service_type_is_recognised_whatever_the_casing(session_id, typed):
+    fill_valid_draft(session_id, service_type=typed)
+    result = tools.validate_shipment(session_id)
+
+    assert result["validated"] is True
+    assert tools.get_summary(session_id)["draft"]["service_type"] == typed.capitalize()
+
+
+def test_a_service_we_do_not_offer_is_still_refused(session_id):
+    fill_valid_draft(session_id, service_type="Overnight")
+    result = tools.validate_shipment(session_id)
+
+    assert result["validated"] is False
+    assert any("Overnight" in error for error in result["errors"])

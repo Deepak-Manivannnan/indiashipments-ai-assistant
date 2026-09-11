@@ -93,9 +93,9 @@ def test_an_outage_is_not_mistaken_for_an_unserviceable_pin(pin_service_down):
 def test_an_outage_warns_but_does_not_block_the_booking(pin_service_down):
     """The brief: fail clearly and keep the draft. Not: refuse to proceed."""
     draft = {
-        "sender": {"name": "A", "phone": "9", "address": "x", "city": "Kochi",
+        "sender": {"name": "A", "phone": "9847012345", "address": "x", "city": "Kochi",
                    "state": "Kerala", "pin": "682031"},
-        "recipient": {"name": "B", "phone": "9", "address": "y",
+        "recipient": {"name": "B", "phone": "9880123456", "address": "y",
                       "city": "Bengaluru", "state": "Karnataka", "pin": "560001"},
         "package": {"weight_g": 2000, "length_mm": 300, "width_mm": 200,
                     "height_mm": 150},
