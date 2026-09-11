@@ -166,6 +166,25 @@ def _require_document(db, shipment_id: int, doc_type: str) -> None:
         db.flush()
 
 
+SENDER_OFFER_DECLINED = "sender_offer_declined"
+
+
+def decline_sender_offer(session_id: str) -> dict:
+    """Record that the customer is not the sender on this shipment.
+
+    Without this the offer is made again on the next turn, because nothing in
+    the draft has changed yet -- they have said no, but not yet said who.
+    """
+    with session_scope() as db:
+        shipment = _get_draft(db, session_id)
+        if shipment is None:
+            return _fail("There is no shipment draft for this conversation yet.")
+        sender = dict(shipment.sender_json or {})
+        sender[SENDER_OFFER_DECLINED] = True
+        shipment.sender_json = sender
+        return {"ok": True, "note": "Collect the sender's details from the user."}
+
+
 def _last_sender_used(db, customer_id: int, exclude_id: int) -> dict | None:
     """The sender block from this customer's most recent booking."""
     previous = db.scalars(
@@ -199,6 +218,8 @@ def _gate_on_sender_choice(db, session_id: str, shipment: Shipment,
     sender = shipment.sender_json or {}
     if sender.get("name") and sender.get("phone"):
         return payload  # we know who is sending and how to reach them
+    if sender.get(SENDER_OFFER_DECLINED):
+        return payload  # they have already said it is somebody else
 
     state = _get_state(db, session_id)
     if state.customer_id is None:
@@ -520,7 +541,8 @@ def prefill_sender_from_last_shipment(session_id: str) -> dict:
         to_apply = {
             f"sender_{key}": value
             for key, value in previous.items()
-            if key != "city_pin_accepted" and value and not already.get(key)
+            if key not in ("city_pin_accepted", SENDER_OFFER_DECLINED)
+            and value and not already.get(key)
         }
 
     saved = save_draft(session_id=session_id, **to_apply) if to_apply else {}

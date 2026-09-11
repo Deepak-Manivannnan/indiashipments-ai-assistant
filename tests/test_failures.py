@@ -291,3 +291,25 @@ def test_no_buttons_are_offered_while_a_document_is_outstanding(signed_in_sessio
     )]
     options, _ = loop._options_for(stale, state)
     assert options == []
+
+
+def test_answering_the_sender_question_settles_it(signed_in_session):
+    """Regression: the customer chose "A different sender" and was offered the
+    same two buttons again, because nothing recorded the answer."""
+    tools.save_draft(signed_in_session, weight_g=5000)
+    assert tools.get_summary(signed_in_session)["awaiting_sender_choice"] is True
+
+    loop._record_chosen_option(signed_in_session, "A different sender")
+    after = tools.get_summary(signed_in_session)
+    assert after.get("awaiting_sender_choice", False) is False
+    assert after["ask_next_options"] != "sender_address"
+
+
+def test_accepting_the_offer_also_settles_it(signed_in_session):
+    tools.save_draft(signed_in_session, weight_g=5000)
+    loop._record_chosen_option(signed_in_session, "Use my saved details")
+
+    after = tools.get_summary(signed_in_session)
+    assert after.get("awaiting_sender_choice", False) is False
+    assert after["draft"]["sender"]["name"] == "Rahul Menon"
+    assert after["draft"]["sender"]["phone"] == "9847012345"

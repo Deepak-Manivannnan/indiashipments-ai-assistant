@@ -351,6 +351,16 @@ def _record_chosen_option(session_id: str, message: str) -> None:
 
     if lowered in {"standard", "express"}:
         tools.save_draft(session_id=session_id, service_type=answer.capitalize())
+        return
+
+    # Answers to the sender question. Acting on them here means the offer is
+    # never repeated after it has been answered.
+    if lowered == "use my saved details":
+        tools.prefill_sender_from_profile(session_id)
+    elif lowered == "use my last shipment's details":
+        tools.prefill_sender_from_last_shipment(session_id)
+    elif lowered in {"a different sender", "someone else is sending"}:
+        tools.decline_sender_offer(session_id)
 
 
 def _acceptance_note(message: str) -> str:
