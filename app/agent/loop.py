@@ -411,6 +411,7 @@ FIELD_LANGUAGE = {
         "planning to send", "like to send", "want to send", "wish to send",
         "you be sending", "you sending", "in the parcel", "in the package",
         "in this package", "in this parcel", "what's in", "what is in",
+        "category", "categories", "best fits",
     ),
     "service_type": (
         "service", "standard", "express", "how quickly", "how fast", "speed",
@@ -430,6 +431,38 @@ def _fits_the_question(field: str | None, reply: str, options: list[str]) -> boo
     if any(option.lower() in spoken for option in options):
         return True
     return any(phrase in spoken for phrase in FIELD_LANGUAGE.get(field, ()))
+
+
+_SENTENCE = re.compile(r"[^.!?]+[.!?]*")
+
+
+def _asks_what_is_being_sent(reply: str, options: list[str]) -> bool:
+    """Is this reply actually *asking* what is in the parcel?
+
+    Stricter than _fits_the_question, because it runs when there is no draft to
+    say what the question was -- the wording is the only evidence there is. A
+    passing mention is not a question: "I can start a new shipment if you'd like
+    to send something else" declines to edit a booking, and offering nine
+    contents categories underneath it answers nothing that was asked.
+
+    So the phrase has to sit inside a sentence that is genuinely putting the
+    question: one that asks, and that asks *what*.
+    """
+    phrases = FIELD_LANGUAGE["contents_category"]
+    for raw in _SENTENCE.findall(reply):
+        sentence = raw.strip().lower()
+        asking = (
+            sentence.endswith("?")
+            or "tell me what" in sentence
+            or "let me know what" in sentence
+        )
+        if not asking or not any(w in sentence for w in ("what", "which")):
+            continue
+        if any(phrase in sentence for phrase in phrases):
+            return True
+        if any(option.lower() in sentence for option in options):
+            return True
+    return False
 
 
 def _options_for(calls: list[ToolCallRecord], state: dict,
@@ -470,7 +503,7 @@ def _options_for(calls: list[ToolCallRecord], state: dict,
     # question does not collect somebody else's answers.
     categories = tools.list_options("contents_category")
     options = categories.get("options", []) if categories.get("ok") else []
-    if options and _fits_the_question("contents_category", reply, options):
+    if options and _asks_what_is_being_sent(reply, options):
         return options, "contents_category"
 
     for call in reversed(calls):

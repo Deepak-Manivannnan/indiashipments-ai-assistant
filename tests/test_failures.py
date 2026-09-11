@@ -413,3 +413,35 @@ def test_a_question_about_something_else_gets_no_categories(reply):
 
     assert options == []
     assert field is None
+
+
+@pytest.mark.parametrize("reply", [
+    # Declining to edit a booking mentions sending, and used to collect nine
+    # contents categories underneath it.
+    "I'm afraid I cannot edit a shipment once it has been booked. I can help "
+    "you start a new shipment if you'd like to send something else, or I can "
+    "check the status of your current one for you. Would you like to do "
+    "either of those?",
+    "Happy to start a new one whenever you'd like to send something else.",
+    "Your booking is confirmed! Your tracking reference is RI-3249.",
+    "You're very welcome! I'm glad I could help. Have a great day!",
+])
+def test_mentioning_sending_is_not_asking_what_is_being_sent(reply):
+    """A passing mention is not a question, and gets no buttons."""
+    from app.agent.loop import _options_for
+
+    options, field = _options_for([], {"has_draft": False}, reply)
+
+    assert options == []
+    assert field is None
+
+
+def test_asking_which_category_still_offers_them():
+    from app.agent.loop import _options_for
+
+    options, field = _options_for(
+        [], {"has_draft": False}, "Which category best fits your parcel?"
+    )
+
+    assert field == "contents_category"
+    assert "Medicines" in options
