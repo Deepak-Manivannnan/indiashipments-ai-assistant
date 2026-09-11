@@ -313,3 +313,36 @@ def test_accepting_the_offer_also_settles_it(signed_in_session):
     assert after.get("awaiting_sender_choice", False) is False
     assert after["draft"]["sender"]["name"] == "Rahul Menon"
     assert after["draft"]["sender"]["phone"] == "9847012345"
+
+
+def test_the_question_and_its_buttons_always_match(signed_in_session):
+    """Regression: the customer was asked for the sender's address and offered
+    a list of parcel contents underneath it."""
+    tools.save_draft(signed_in_session, weight_g=5000)
+    loop._record_chosen_option(signed_in_session, "A different sender")
+
+    after = tools.get_summary(signed_in_session)
+    assert after["awaiting_sender_details"] is True
+    assert after["ask_next"] == "the sender's details"
+    assert after["ask_next_options"] is None      # a free-text question
+
+    # Once answered, the next fixed-choice question brings its own list back.
+    tools.save_draft(signed_in_session, sender_name="Priya S",
+                     sender_phone="9840055667", sender_address="8 Anna Salai",
+                     sender_city="Chennai", sender_pin="600002")
+    nxt = tools.get_summary(signed_in_session)
+    assert nxt["ask_next_options"] == "contents_category"
+
+
+def test_the_order_follows_the_customer(signed_in_session):
+    """Nothing already given is asked for again, whatever order it arrives in."""
+    tools.save_draft(
+        signed_in_session, contents="Books", service_type="Express",
+        declared_value=900, weight_g=2000,
+    )
+    loop._record_chosen_option(signed_in_session, "Use my saved details")
+
+    summary = tools.get_summary(signed_in_session)
+    for already_given in ("contents", "service type", "value of the contents",
+                          "package weight", "sender"):
+        assert already_given not in (summary["ask_next"] or "")

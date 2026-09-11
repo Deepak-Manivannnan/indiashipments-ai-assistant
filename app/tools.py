@@ -218,8 +218,23 @@ def _gate_on_sender_choice(db, session_id: str, shipment: Shipment,
     sender = shipment.sender_json or {}
     if sender.get("name") and sender.get("phone"):
         return payload  # we know who is sending and how to reach them
+
     if sender.get(SENDER_OFFER_DECLINED):
-        return payload  # they have already said it is somebody else
+        # They have said it is somebody else, so the sender's details are what
+        # comes next -- not whatever the usual order would have picked. The
+        # question on screen and the buttons under it have to be about the same
+        # thing, or the customer is asked for an address and offered a list of
+        # parcel contents.
+        payload["awaiting_sender_details"] = True
+        payload["ask_next"] = "the sender's details"
+        payload["ask_next_options"] = None
+        payload["ask_next_instruction"] = (
+            "The customer has said someone else is sending this parcel. Ask for "
+            "that person's name, phone number and full address with the PIN "
+            "code. They may give it all in one message or a piece at a time -- "
+            "take whatever they give and ask only for what is still missing."
+        )
+        return payload
 
     state = _get_state(db, session_id)
     if state.customer_id is None:
